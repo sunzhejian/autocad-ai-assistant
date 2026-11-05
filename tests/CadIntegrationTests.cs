@@ -89,6 +89,33 @@ public sealed class CadIntegrationTests
                 if (hatch != null) Check(hatch.NumberOfLoops == 2 && Math.Abs(hatch.Area - 54000000) < 1, "hatch preserves hole after cm conversion");
             }
         }
+        var materialBefore=Count();
+        var materials="{\"commands\":[{\"type\":\"hatch\",\"material\":\"gravel\",\"spacing\":50,\"points\":[[20000,0],[21000,0],[21000,200],[20000,200]]},{\"type\":\"hatch\",\"material\":\"gravel\",\"spacing\":50,\"points\":[[20000,500],[25000,500],[25000,700],[20000,700]]}]}";
+        Check(Run(materials)!=null && Count()==materialBefore+2,"material hatch native execution");
+        using(var tr=db.TransactionManager.StartTransaction())
+        {
+            var bt=(BlockTable)tr.GetObject(db.BlockTableId,OpenMode.ForRead);
+            var space=(BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace],OpenMode.ForRead);
+            var scales=new List<double>();
+            foreach(ObjectId id in space)
+            {
+                var hatch=tr.GetObject(id,OpenMode.ForRead) as Hatch;
+                if(hatch!=null && hatch.PatternName=="GRAVEL")scales.Add(hatch.PatternScale);
+            }
+            Check(scales.Count==2 && Math.Abs(scales[0]-scales[1])<1e-8,"texture size independent of long boundary");
+        }
+        var denseBefore=Count();
+        Check(Run("{\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":5},{\"type\":\"hatch\",\"material\":\"sand\",\"spacing\":0.1,\"points\":[[0,0],[1000,0],[1000,1000],[0,1000]]}]}")==null
+            && Count()==denseBefore,"excessive density rolls back native batch");
+        Run("{\"commands\":[{\"type\":\"setvar\",\"name\":\"DIMSCALE\",\"value\":1},{\"type\":\"hatch\",\"material\":\"gravel\",\"points\":[[30000,0],[30010,0],[30010,10],[30000,10]]},{\"type\":\"setvar\",\"name\":\"DIMSCALE\",\"value\":0.5},{\"type\":\"hatch\",\"material\":\"gravel\",\"points\":[[30020,0],[30030,0],[30030,10],[30020,10]]}]}");
+        using(var tr=db.TransactionManager.StartTransaction())
+        {
+            var bt=(BlockTable)tr.GetObject(db.BlockTableId,OpenMode.ForRead);
+            var space=(BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace],OpenMode.ForRead);
+            var scales=new List<double>();
+            foreach(ObjectId id in space){var h=tr.GetObject(id,OpenMode.ForRead) as Hatch;if(h!=null&&h.PatternName=="GRAVEL")scales.Add(h.PatternScale);}
+            Check(scales.Count==4&&Math.Abs(scales[3]/scales[2]-.5)<1e-8,"material density follows enlarged paper scale");
+        }
         countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");

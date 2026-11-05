@@ -9,6 +9,8 @@ cases = json.loads((root / "tests/corpus_cases.json").read_text(encoding="utf-8"
 mapping = {"fifth-channel": "candidate-fast-fifth", "sixth-section33": "candidate-source-sixth33", "seventh-detail": "candidate-seventh-detail"}
 rows = []
 for case in cases:
+    if case["id"] not in mapping:
+        continue
     response = json.loads((bench / (mapping[case["id"]] + ".json")).read_text(encoding="utf-8"))
     plan = json.loads(response["plan"])
     native = json.loads((root / "artifacts/reproductions" / (case["id"] + ".native.json")).read_text(encoding="utf-8"))

@@ -15,6 +15,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("folder", type=Path, nargs="?", default=Path("artifacts/reproductions"))
 args = parser.parse_args()
 for path in args.folder.glob("*.dxf"):
+    native_pdf = path.with_suffix(".pdf")
+    if native_pdf.exists():
+        import fitz
+        with fitz.open(native_pdf) as pdf:
+            pdf[0].get_pixmap(matrix=fitz.Matrix(2,2)).save(path.with_suffix(".png"))
+        print(f"Rendered AutoCAD PDF {native_pdf.name}")
+        continue
     doc = ezdxf.readfile(path)
     # Preview-only Unicode font mapping; source DWG/DXF files keep their original CAD fonts.
     font = Path("C:/Windows/Fonts/simhei.ttf")

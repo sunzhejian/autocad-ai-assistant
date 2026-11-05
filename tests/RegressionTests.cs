@@ -35,11 +35,12 @@ internal static class RegressionTests
             using (var b = new Bitmap(200, 100))
             using (var g = Graphics.FromImage(b)) { g.Clear(Color.White); g.DrawRectangle(Pens.Black, 10, 10, 180, 80); b.Save(ImagePath); }
             TestValidation();
+            TestMaterials();
             foreach (var fixture in Directory.GetFiles("tests/fixtures", "*.json"))
             {
                 var plan = File.ReadAllText(fixture, Encoding.UTF8);
                 Check(CadPlanValidator.Validate(plan) == null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(plan)) == null,
-                    "real model plan " + Path.GetFileNameWithoutExtension(fixture));
+                    "saved drawing plan " + Path.GetFileNameWithoutExtension(fixture));
             }
             TestImages();
             TestCache(folder);
@@ -101,6 +102,22 @@ internal static class RegressionTests
         var large = ImagePreprocessor.PrepareViews(largePath, CancellationToken.None);
         Check(large.Count == 5, "large sheet overview plus four details");
         Check(ImagePreprocessor.PrepareViews(largePath, CancellationToken.None, false).Count == 1, "fast mode avoids detail overhead");
+    }
+
+    private static void TestMaterials()
+    {
+        string pattern; double paperSize;
+        Check(HatchMaterialPolicy.TryResolve("堆石",out pattern,out paperSize) && pattern=="GRAVEL", "riprap material uses stone pattern");
+        Check(HatchMaterialPolicy.TryResolve("sand",out pattern,out paperSize) && pattern=="AR-SAND", "sand material uses stipple pattern");
+        var shape="{\"type\":\"hatch\",\"points\":[[0,0],[100,0],[100,100],[0,100]],\"material\":\"sand\",\"spacing\":5}";
+        Check(CadPlanValidator.Validate(Plan(shape))==null, "material hatch accepts explicit spacing");
+        Check(CadPlanValidator.Validate(Plan(shape.Replace("sand","mystery")))!=null, "unknown hatch material rejected");
+        Check(CadPlanValidator.Validate(Plan(shape.Replace("\"spacing\":5","\"spacing\":-1")))!=null, "negative texture spacing rejected");
+        var normalized=CadPlanNormalizer.Normalize("{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":["+shape+"]}");
+        var root=(Dictionary<string,object>)Json.DeserializeObject(normalized);
+        var c=(Dictionary<string,object>)((object[])root["commands"])[0];
+        Check(Convert.ToDouble(c["spacing"])==50, "texture spacing converts with source geometry");
+        Check(HatchMaterialPolicy.TooDense(1000000,.1), "excessive hatch density detected");
     }
 
     private static void TestCache(string folder)

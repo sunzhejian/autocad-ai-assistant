@@ -191,6 +191,15 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 var error = CheckPoints(command, "points", 3, "填充边界至少需要 3 个点。");
                 if (error != null) return error;
+                var material = Text(command, "material");
+                if (material.Length > 0)
+                {
+                    string pattern; double paperSize;
+                    if (!HatchMaterialPolicy.TryResolve(material, out pattern, out paperSize)) return "未知填充材料：" + material;
+                    if (Text(command, "pattern").Length > 0 && !Text(command, "pattern").Equals(pattern, StringComparison.OrdinalIgnoreCase))
+                        return "材料与 pattern 不一致，请仅指定 material 或使用对应预设。";
+                }
+                if (command.ContainsKey("spacing")) { error = Positive(command, "spacing"); if (error != null) return error; }
                 if (command.ContainsKey("holes"))
                 {
                     var holes = command["holes"] as object[];

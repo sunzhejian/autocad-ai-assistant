@@ -19,7 +19,7 @@ namespace AutoCAD.AI.Assistant.Services
             "layer{name,color,linetype,lineweight}；line{points}；polyline{points,closed,width}；rect{p1,p2}；" +
             "ngon{center,sides,radius}；circle{center,radius}；arc{center,radius,start,end}；ellipse{center,major,ratio}；" +
             "spline{points}；point{position}；text{position,height,content}；mtext{position,height,width,content}；" +
-            "hatch{points,holes,pattern,scale,angle}（holes为内孔多边形数组，空心剖面不能填满孔洞）；dimlinear{p1,p2,position,rotation}；dimaligned{p1,p2,position}；" +
+            "hatch{points,holes,material,spacing,pattern,scale,angle}（holes为内孔多边形数组。材料优先material:riprap块石/gravel碎石/sand砂/earth土/clay粘土/concrete混凝土，自动按当前DIMSCALE控制纸面疏密；spacing可选，指定源坐标单位下的纹理大小；不要用几块孤立多边形代替整个石材区域填充。材料填充与文字、引线分开，保留层间边界与内孔）；dimlinear{p1,p2,position,rotation}；dimaligned{p1,p2,position}；" +
             "dimradius{center,point}；dimdiameter{center,point}；block{name,commands}；insert{name,position,rotation,scale}；setvar{name,value}；" +
             "standard{}（建标准图层+仿宋+SL73标注）；frame{size,title,scale,number,company,date,origin}（A0–A4 图框+标题栏，原点0,0；scale 为出图比例如 1:100，执行器按该比例整体放大图框/标题栏/字高，并自动设置 DIMSCALE 与 LTSCALE）。" +
             "规则：含块内部共≤400条；连续折线优先polyline，重复构件用block+insert，勿凑指令数。完整图纸先standard再frame；局部截图不加图框。frame固定按纸面mm生成；源单位坐标布局时，图框宽高/内框边距/字高需除以源单位毫米系数（cm为10，m为1000），避开右下标题栏。尺寸优先于像素比例；从基准和尺寸链计算坐标，保证投影对应和对称；剖面用hatch、图名说明用text。每条图片尺寸标注附value（源图读数）、confidence:read/inferred/unknown；模糊尺寸不得冒充read。source坐标模式下，dimlinear的value须等于端点在rotation方向投影长度，dimaligned为实际距离；dimdiameter的point是圆周点。text只可用<>或<>（估），不可覆盖测量值。无需复述题面。1:100字高为350mm，若sourceUnit=cm则height=35。" +

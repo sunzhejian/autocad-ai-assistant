@@ -453,7 +453,7 @@ namespace AutoCAD.AI.Assistant.Services
             EnsureLayer(transaction, database, layerTable, "文字", 7, "CONTINUOUS", 0.25);
             EnsureLayer(transaction, database, layerTable, "剖面线", 8, "CONTINUOUS", 0.25);
             EnsureLayer(transaction, database, layerTable, "图框", 7, "CONTINUOUS", 0.7);
-            EnsureTextStyle(transaction, database, "仿宋", "simfang.shx", "gbcbig.shx");
+            EnsureTextStyle(transaction, database, "仿宋", "simfang.ttf", null);
             EnsureDimStyle(transaction, database, "SL73");
             var previousScale = database.Dimscale;
             var dimTable = (DimStyleTable)transaction.GetObject(database.DimStyleTableId, OpenMode.ForRead);
@@ -693,7 +693,7 @@ namespace AutoCAD.AI.Assistant.Services
             }
         }
 
-        /// <summary>设置系统变量：明显非法的可选变量直接忽略并记日志，避免打断整批绘制。</summary>
+        /// <summary>Match the host's variable type, including JSON decimal values, before native assignment.</summary>
         private static bool TrySetVariable(string name, object value)
         {
             var key = name.Trim().ToUpperInvariant();
@@ -707,6 +707,8 @@ namespace AutoCAD.AI.Assistant.Services
 
             try
             {
+                var current = AcApplication.GetSystemVariable(key);
+                if (current != null) value = Convert.ChangeType(value, current.GetType(), CultureInfo.InvariantCulture);
                 AcApplication.SetSystemVariable(key, value);
                 return true;
             }
@@ -784,6 +786,20 @@ namespace AutoCAD.AI.Assistant.Services
                 var typeface = chosen.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
                     ? System.IO.Path.GetFileNameWithoutExtension(chosen)
                     : chosen;
+                if (chosen.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) || chosen.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase))
+                {
+                    var path = System.IO.Path.IsPathRooted(chosen) ? chosen : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), chosen);
+                    if (System.IO.File.Exists(path))
+                    {
+                        using (var fonts = new System.Drawing.Text.PrivateFontCollection())
+                        {
+                            fonts.AddFontFile(path);
+                            if (fonts.Families.Length > 0) typeface = fonts.Families[0].Name;
+                        }
+                        record.FileName = path;
+                        chosenBig = null;
+                    }
+                }
                 record.Font = new Autodesk.AutoCAD.GraphicsInterface.FontDescriptor(typeface, false, false, 0, 0);
             }
             catch (Exception ex)
@@ -1109,6 +1125,10 @@ namespace AutoCAD.AI.Assistant.Services
             var points = Points(command, "points");
             if (points.Count < 3) throw new InvalidOperationException("hatch 至少需要 3 个点。");
             var pattern = Text(command, "pattern");
+            var material = Text(command, "material");
+            string presetPattern; double paperSize;
+            var hasMaterial = HatchMaterialPolicy.TryResolve(material, out presetPattern, out paperSize);
+            if (hasMaterial) pattern = presetPattern;
             if (pattern.Length == 0) pattern = "ANSI31";
             var solid = string.Equals(pattern, "SOLID", StringComparison.OrdinalIgnoreCase);
 
@@ -1118,6 +1138,28 @@ namespace AutoCAD.AI.Assistant.Services
             var requestedScale = Number(command, "scale", 0);
             var autoScale = ComputeHatchScale(points);
             hatch.PatternScale = solid ? 1.0 : Math.Max(0.01, autoScale * (requestedScale <= 0 ? 1.0 : requestedScale));
+            if (!solid && (hasMaterial || command.ContainsKey("spacing")))
+            {
+                var currentScale = space.Database.Dimscale > 0 ? space.Database.Dimscale : 1;
+                var target = Number(command, "spacing", paperSize * currentScale);
+                if (target <= 0) throw new InvalidOperationException("填充 spacing 必须大于 0。");
+                target *= requestedScale > 0 ? requestedScale : 1;
+                var area = PolygonArea(points);
+                if (HatchMaterialPolicy.TooDense(area, target)) throw new InvalidOperationException("填充过密，请提高 spacing 或 scale。");
+                hatch.PatternScale = 1;
+                var positives = new List<double>(); var negatives = new List<double>(); var offsets = new List<double>();
+                for (var i = 0; i < hatch.NumberOfPatternDefinitions; i++)
+                {
+                    var definition = hatch.GetPatternDefinitionAt(i);
+                    var offset = Math.Sqrt(definition.OffsetX * definition.OffsetX + definition.OffsetY * definition.OffsetY);
+                    if (offset > 1e-8) offsets.Add(offset);
+                    foreach (double dash in definition.GetDashes())
+                    { if (dash > 1e-8) positives.Add(dash); else if (dash < -1e-8) negatives.Add(-dash); }
+                }
+                hatch.PatternScale = target / HatchMaterialPolicy.FeatureSize(pattern, positives, negatives, offsets);
+                DiagnosticsLog.Write("材料填充 " + (hasMaterial ? material : pattern) + " 特征尺寸mm=" + target.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " pattern=" + pattern + " scale=" + hatch.PatternScale.ToString("0.###", CultureInfo.InvariantCulture));
+            }
             hatch.PatternAngle = Number(command, "angle", 0) * Math.PI / 180.0;
 
             var vertices = new Point2dCollection();
@@ -1266,6 +1308,15 @@ namespace AutoCAD.AI.Assistant.Services
             var diagonal = Math.Sqrt(dx * dx + dy * dy);
             if (diagonal <= 0) return 1.0;
             return Math.Max(0.05, diagonal / 100.0);
+        }
+
+        private static double PolygonArea(List<Point3d> points)
+        {
+            var area = 0.0;
+            var origin = points[0];
+            for (var i = 1; i < points.Count - 1; i++)
+                area += (points[i].X-origin.X)*(points[i+1].Y-origin.Y)-(points[i].Y-origin.Y)*(points[i+1].X-origin.X);
+            return Math.Abs(area)/2;
         }
 
         private static List<Point3d> Points(Dictionary<string, object> command, string key)

@@ -1,6 +1,6 @@
 # AutoCAD AI 助手
 
-AutoCAD 2024 的按需加载插件，支持兼容 OpenAI Chat Completions 的模型、图纸图片复刻和结构化几何绘制。当前版本 **1.1.0**，.NET Framework 4.8 / Windows x64。
+AutoCAD 2024 的按需加载插件，支持兼容 OpenAI Chat Completions 的模型、图纸图片复刻和结构化几何绘制。当前版本 **1.1.1**，.NET Framework 4.8 / Windows x64。
 
 ## 使用
 
@@ -21,6 +21,8 @@ AutoCAD 2024 的按需加载插件，支持兼容 OpenAI Chat Completions 的模
 
 本地检查能拦截单位、几何及协议错误，不能证明所有像素都被正确理解。复杂全图、模糊小字和扭面仍需人工核对。[实测记录](docs/verification-2026-11-05.md) 包含成功样本、失败尝试和局限。
 
+填充可指定 `material: riprap/gravel/sand/earth/clay/concrete`，分别表达块石、碎石、砂、土、粘土和混凝土。预设按当前 DIMSCALE 控制纸面纹理大小，薄长区域与短区域保持同样疏密；`spacing` 可直接指定源坐标单位下的纹理特征尺寸，`scale` 调整疏密。填充过密时整批停止并回滚。复杂 CAD 图案的预览以 AutoCAD 原生 PDF 为准，通用 DXF 渲染器可能漏绘填充线。
+
 ## 编译与验证
 
 依赖 AutoCAD 2024 安装目录中的 `acmgd.dll`、`acdbmgd.dll`、`accoremgd.dll`，以及 .NET Framework 4.8 开发工具。默认目录 `D:\AutoCAD 2024`，可通过 MSBuild 的 `AutoCAD2024Path` 属性修改。
@@ -40,8 +42,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\Test-Cad.ps1
 python tools\prepare_corpus.py 'D:\AutoCAD 2024\高教杯水利赛道'
 powershell -File tools\Reproduce-Cad.ps1 -Plan tests\fixtures\sixth-section33.json -Name sixth-section33
 python tools\render_reproductions.py
+powershell -File tools\Reproduce-Cad.ps1 -Plan tests\fixtures\hebei-earth-dam-reviewed.json -Name hebei-earth-dam -PlotPdf
 ```
 
 PDF 工具依赖 `pymupdf`；预览工具依赖 `ezdxf` 和 `matplotlib`。`ModelBenchmark.cs` 使用实际插件 DLL 与已有本地模型配置发送真实请求；生成可执行文件后，其参数为 `插件.dll 图片.png 结果.json [提示]`。真实请求会使用所配置服务的额度。
 
-已索引题库目录内 17 份 PDF、637 页，包含通知、标准、真题和答案；本轮仅选取第五届整图、第六届 3-3 断面、第七届扭面大样做复刻。原始 PDF、图片、密钥、本地模型配置和运行产物均不上传。仓库保留三个模型生成计划，作为可重复的回归样本。本次工作不涉及远程模型权重微调。
+已索引题库目录内 17 份 PDF、637 页，包含通知、标准、真题和答案；已选取第五届整图、第六届 3-3 断面、第七届扭面大样及河北样题土坝图做复刻。原始 PDF、图片、密钥、本地模型配置和运行产物均不上传。仓库保留三个模型生成计划及一个人工核对后的土坝计划，作为可重复的回归样本。[土坝复刻记录](docs/hebei-earth-dam-2026-11-05.md) 区分了模型输出与人工修订。本次工作不涉及远程模型权重微调。
