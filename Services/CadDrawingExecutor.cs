@@ -13,6 +13,26 @@ namespace AutoCAD.AI.Assistant.Services
 {
     internal sealed class CadDrawingExecutor
     {
+        public string LastReceiptPath { get; private set; }
+        private static void AppendEntity(BlockTableRecord space, Entity entity)
+        {
+            space.AppendEntity(entity);
+            CadExecutionReceipt.Record(entity);
+        }
+        internal static void ZoomToExtents(Document document)
+        {
+            var database = document.Database;
+            database.UpdateExt(true);
+            using (var view = document.Editor.GetCurrentView())
+            {
+                var min = database.Extmin; var max = database.Extmax;
+                var aspect = view.Width / Math.Max(view.Height, 1e-9);
+                view.Height = Math.Max(max.Y - min.Y, (max.X - min.X) / aspect) * 1.1 + 1;
+                view.Width = view.Height * aspect;
+                view.CenterPoint = new Point2d((min.X + max.X) / 2, (min.Y + max.Y) / 2);
+                document.Editor.SetCurrentView(view);
+            }
+        }
         public static string ExtractPlan(string answer)
         {
             return CadPlanText.Extract(answer);
@@ -155,6 +175,7 @@ namespace AutoCAD.AI.Assistant.Services
 
         public string Execute(string json, out string message)
         {
+            LastReceiptPath = null;
             var validation = CadPlanValidator.Validate(json);
             if (validation != null) { message = "计划校验失败：" + validation; return null; }
             json = CadPlanNormalizer.Normalize(json);
@@ -192,36 +213,46 @@ namespace AutoCAD.AI.Assistant.Services
             var errors = new List<string>();
             var layers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Database database = document.Database;
+            var previousUnits = database.Insunits;
             var previousVariables = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             foreach (var variable in CadPlanValidator.DrawingVariables)
             {
                 try { previousVariables[variable] = AcApplication.GetSystemVariable(variable); } catch { }
             }
 
-            using (document.LockDocument())
-            using (var transaction = database.TransactionManager.StartTransaction())
+            using (var receipt = new CadExecutionReceipt(database))
             {
-                try
+                using (document.LockDocument())
+                using (var transaction = database.TransactionManager.StartTransaction())
                 {
-                    var table = (BlockTable)transaction.GetObject(database.BlockTableId, OpenMode.ForRead);
-                    var space = (BlockTableRecord)transaction.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
-                    var layerTable = (LayerTable)transaction.GetObject(database.LayerTableId, OpenMode.ForRead);
-                    var automaticScale = CadPlanQuality.SuggestDimensionScale(root);
-                    if (automaticScale > 0) database.Dimscale = automaticScale;
-                    var unit = root.ContainsKey("sourceUnit") ? Convert.ToString(root["sourceUnit"]) : "mm";
-                    PrepareDimensionUnits(commands, 1.0 / CadPlanQuality.UnitFactor(unit));
-                    ExecuteCommands(commands, transaction, database, table, space, layerTable, layers, ref created, ref applied, errors);
-                    database.Insunits = UnitsValue.Millimeters;
-                    transaction.Commit();
+                    try
+                    {
+                        var table = (BlockTable)transaction.GetObject(database.BlockTableId, OpenMode.ForRead);
+                        var space = (BlockTableRecord)transaction.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                        var layerTable = (LayerTable)transaction.GetObject(database.LayerTableId, OpenMode.ForRead);
+                        var automaticScale = CadPlanQuality.SuggestDimensionScale(root);
+                        if (automaticScale > 0) database.Dimscale = automaticScale;
+                        var unit = root.ContainsKey("sourceUnit") ? Convert.ToString(root["sourceUnit"]) : "mm";
+                        PrepareDimensionUnits(commands, 1.0 / CadPlanQuality.UnitFactor(unit));
+                        ExecuteCommands(commands, transaction, database, table, space, layerTable, layers, ref created, ref applied, errors, receipt, "");
+                        database.Insunits = UnitsValue.Millimeters;
+                        receipt.Inspect(transaction);
+                        created = receipt.ObjectCount;
+                        transaction.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticsLog.Error("原生执行/校核", ex);
+                        transaction.Abort();
+                        database.Insunits = previousUnits;
+                        foreach (var variable in previousVariables)
+                            try { AcApplication.SetSystemVariable(variable.Key, variable.Value); } catch { }
+                        message = "整批绘图已回滚：" + ex.Message;
+                        return null;
+                    }
                 }
-                catch (Exception ex)
-                {
-                    transaction.Abort();
-                    foreach (var variable in previousVariables)
-                        try { AcApplication.SetSystemVariable(variable.Key, variable.Value); } catch { }
-                    message = "整批绘图已回滚：" + ex.Message;
-                    return null;
-                }
+                LastReceiptPath = receipt.Save(json, document.Name);
+                DiagnosticsLog.Write("原生校核 标注=" + receipt.Dimensions + " 填充=" + receipt.Hatches + " 回执=" + LastReceiptPath);
             }
 
             if (created > 0)
@@ -231,16 +262,7 @@ namespace AutoCAD.AI.Assistant.Services
                     AcApplication.SetSystemVariable("LWDISPLAY", 1);
                     document.Editor.Regen();
                     // Zoom through the view API: a queued ZOOM command would consume the next undo step.
-                    database.UpdateExt(true);
-                    using (var view = document.Editor.GetCurrentView())
-                    {
-                        var min = database.Extmin; var max = database.Extmax;
-                        var aspect = view.Width / Math.Max(view.Height, 1e-9);
-                        view.Height = Math.Max(max.Y - min.Y, (max.X - min.X) / aspect) * 1.1 + 1;
-                        view.Width = view.Height * aspect;
-                        view.CenterPoint = new Point2d((min.X + max.X) / 2, (min.Y + max.Y) / 2);
-                        document.Editor.SetCurrentView(view);
-                    }
+                    ZoomToExtents(document);
                 }
                 catch
                 {
@@ -249,7 +271,7 @@ namespace AutoCAD.AI.Assistant.Services
 
             var summary = new StringBuilder();
             if (created > 0)
-                summary.Append("已在模型空间绘制 " + created + " 个对象，可输入 U 撤销。");
+                summary.Append("已创建 " + created + " 个图元（含块定义），可输入 U 撤销。");
             else if (applied > 0)
                 summary.Append("已执行 " + applied + " 条设置类指令，未新建图元。");
             else
@@ -261,17 +283,21 @@ namespace AutoCAD.AI.Assistant.Services
                 if (errors.Count > 1) summary.Append("；" + errors[1]);
             }
             message = summary.ToString();
+            message += LastReceiptPath == null ? " 校核已通过，回执保存失败。" : " 原生尺寸/填充校核通过，回执已保存。";
             DiagnosticsLog.Write("CAD执行 " + timer.ElapsedMilliseconds + "ms 对象=" + created);
             return created > 0 || applied > 0 ? message : null;
         }
 
         private static void ExecuteCommands(object[] commands, Transaction transaction, Database database, BlockTable blockTable,
-            BlockTableRecord space, LayerTable layerTable, HashSet<string> layers, ref int created, ref int applied, List<string> errors)
+            BlockTableRecord space, LayerTable layerTable, HashSet<string> layers, ref int created, ref int applied, List<string> errors,
+            CadExecutionReceipt receipt, string prefix)
         {
             for (var index = 0; index < commands.Length; index++)
             {
                 var command = commands[index] as Dictionary<string, object>;
                 if (command == null) continue;
+                var path = prefix + (index + 1);
+                receipt.Begin(path, command);
                 try
                 {
                     var type = Text(command, "type").ToLowerInvariant();
@@ -320,7 +346,7 @@ namespace AutoCAD.AI.Assistant.Services
 
                     if (type == "block")
                     {
-                        created += DefineBlock(transaction, database, blockTable, layerTable, layers, command, errors, index);
+                        created += DefineBlock(transaction, database, blockTable, layerTable, layers, command, errors, index, receipt, path);
                         continue;
                     }
 
@@ -523,7 +549,7 @@ namespace AutoCAD.AI.Assistant.Services
                 var approxWidth = content.Length * height * 0.9;
                 text.Position = new Point3d(position.X - approxWidth / 2, position.Y, 0);
             }
-            space.AppendEntity(text);
+            AppendEntity(space, text);
             transaction.AddNewlyCreatedDBObject(text, true);
         }
 
@@ -566,7 +592,7 @@ namespace AutoCAD.AI.Assistant.Services
             border.AddVertexAt(1, new Point2d(x0 + width, y0), 0, 0, 0);
             border.AddVertexAt(2, new Point2d(x0 + width, y0 + height), 0, 0, 0);
             border.AddVertexAt(3, new Point2d(x0, y0 + height), 0, 0, 0);
-            space.AppendEntity(border);
+            AppendEntity(space, border);
             transaction.AddNewlyCreatedDBObject(border, true);
             created++;
 
@@ -575,7 +601,7 @@ namespace AutoCAD.AI.Assistant.Services
             inner.AddVertexAt(1, new Point2d(x0 + width - 5 * factor, y0 + 5 * factor), 0, 0, 0);
             inner.AddVertexAt(2, new Point2d(x0 + width - 5 * factor, y0 + height - 5 * factor), 0, 0, 0);
             inner.AddVertexAt(3, new Point2d(x0 + 25 * factor, y0 + height - 5 * factor), 0, 0, 0);
-            space.AppendEntity(inner);
+            AppendEntity(space, inner);
             transaction.AddNewlyCreatedDBObject(inner, true);
             created++;
 
@@ -589,7 +615,7 @@ namespace AutoCAD.AI.Assistant.Services
             block.AddVertexAt(1, new Point2d(tx2, blockBottom), 0, 0, 0);
             block.AddVertexAt(2, new Point2d(tx2, blockTop), 0, 0, 0);
             block.AddVertexAt(3, new Point2d(tx1, blockTop), 0, 0, 0);
-            space.AppendEntity(block);
+            AppendEntity(space, block);
             transaction.AddNewlyCreatedDBObject(block, true);
             created++;
 
@@ -598,7 +624,7 @@ namespace AutoCAD.AI.Assistant.Services
                 var line = new Line(
                     new Point3d(tx1, ty1 + offset * factor, 0),
                     new Point3d(tx2, ty1 + offset * factor, 0)) { Layer = "细实线" };
-                space.AppendEntity(line);
+                AppendEntity(space, line);
                 transaction.AddNewlyCreatedDBObject(line, true);
                 created++;
             }
@@ -607,7 +633,7 @@ namespace AutoCAD.AI.Assistant.Services
                 var line = new Line(
                     new Point3d(tx1 + offset * factor, ty1, 0),
                     new Point3d(tx1 + offset * factor, ty1 + 30 * factor, 0)) { Layer = "细实线" };
-                space.AppendEntity(line);
+                AppendEntity(space, line);
                 transaction.AddNewlyCreatedDBObject(line, true);
                 created++;
             }
@@ -850,7 +876,7 @@ namespace AutoCAD.AI.Assistant.Services
         }
 
         private static int DefineBlock(Transaction transaction, Database database, BlockTable blockTable, LayerTable layerTable,
-            HashSet<string> layers, Dictionary<string, object> command, List<string> errors, int index)
+            HashSet<string> layers, Dictionary<string, object> command, List<string> errors, int index, CadExecutionReceipt receipt, string path)
         {
             var name = Text(command, "name");
             if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("block 缺少 name。");
@@ -867,7 +893,7 @@ namespace AutoCAD.AI.Assistant.Services
             var created = 0;
             var applied = 0;
             var innerLayers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            ExecuteCommands(inner, transaction, database, blockTable, record, layerTable, innerLayers, ref created, ref applied, errors);
+            ExecuteCommands(inner, transaction, database, blockTable, record, layerTable, innerLayers, ref created, ref applied, errors, receipt, path + ".");
             foreach (var layer in innerLayers) layers.Add(layer);
             return created;
         }
@@ -886,7 +912,7 @@ namespace AutoCAD.AI.Assistant.Services
             if (scale <= 0) scale = 1;
             reference.ScaleFactors = new Scale3d(scale, scale, scale);
             ApplyProperties(reference, command);
-            space.AppendEntity(reference);
+            AppendEntity(space, reference);
             transaction.AddNewlyCreatedDBObject(reference, true);
             return 1;
         }
@@ -946,7 +972,7 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 var line = new Line(points[i], points[i + 1]) { Layer = layer };
                 ApplyProperties(line, command);
-                space.AppendEntity(line);
+                AppendEntity(space, line);
                 transaction.AddNewlyCreatedDBObject(line, true);
                 count++;
             }
@@ -965,7 +991,7 @@ namespace AutoCAD.AI.Assistant.Services
             }
             polyline.Closed = Boolean(command, "closed");
             ApplyProperties(polyline, command);
-            space.AppendEntity(polyline);
+            AppendEntity(space, polyline);
             transaction.AddNewlyCreatedDBObject(polyline, true);
             return 1;
         }
@@ -980,7 +1006,7 @@ namespace AutoCAD.AI.Assistant.Services
             polyline.AddVertexAt(2, new Point2d(p2.X, p2.Y), 0, 0, 0);
             polyline.AddVertexAt(3, new Point2d(p1.X, p2.Y), 0, 0, 0);
             ApplyProperties(polyline, command);
-            space.AppendEntity(polyline);
+            AppendEntity(space, polyline);
             transaction.AddNewlyCreatedDBObject(polyline, true);
             return 1;
         }
@@ -1000,7 +1026,7 @@ namespace AutoCAD.AI.Assistant.Services
                 polyline.AddVertexAt(i, new Point2d(center.X + radius * Math.Cos(angle), center.Y + radius * Math.Sin(angle)), 0, 0, 0);
             }
             ApplyProperties(polyline, command);
-            space.AppendEntity(polyline);
+            AppendEntity(space, polyline);
             transaction.AddNewlyCreatedDBObject(polyline, true);
             return 1;
         }
@@ -1012,7 +1038,7 @@ namespace AutoCAD.AI.Assistant.Services
             if (radius <= 0) throw new InvalidOperationException("circle 的 radius 必须大于 0。");
             var circle = new Circle(center, Vector3d.ZAxis, radius) { Layer = layer };
             ApplyProperties(circle, command);
-            space.AppendEntity(circle);
+            AppendEntity(space, circle);
             transaction.AddNewlyCreatedDBObject(circle, true);
             return 1;
         }
@@ -1026,7 +1052,7 @@ namespace AutoCAD.AI.Assistant.Services
             var end = Number(command, "end", 90) * Math.PI / 180.0;
             var arc = new Arc(center, radius, start, end) { Layer = layer };
             ApplyProperties(arc, command);
-            space.AppendEntity(arc);
+            AppendEntity(space, arc);
             transaction.AddNewlyCreatedDBObject(arc, true);
             return 1;
         }
@@ -1042,7 +1068,7 @@ namespace AutoCAD.AI.Assistant.Services
             var majorAxis = new Vector3d(major * Math.Cos(rotation), major * Math.Sin(rotation), 0);
             var ellipse = new Ellipse(center, Vector3d.ZAxis, majorAxis, ratio, 0, 2 * Math.PI) { Layer = layer };
             ApplyProperties(ellipse, command);
-            space.AppendEntity(ellipse);
+            AppendEntity(space, ellipse);
             transaction.AddNewlyCreatedDBObject(ellipse, true);
             return 1;
         }
@@ -1055,7 +1081,7 @@ namespace AutoCAD.AI.Assistant.Services
             foreach (var point in points) collection.Add(point);
             var spline = new Spline(collection, 3, 0.0) { Layer = layer };
             ApplyProperties(spline, command);
-            space.AppendEntity(spline);
+            AppendEntity(space, spline);
             transaction.AddNewlyCreatedDBObject(spline, true);
             return 1;
         }
@@ -1064,7 +1090,7 @@ namespace AutoCAD.AI.Assistant.Services
         {
             var point = new DBPoint(Point(command, "position")) { Layer = layer };
             ApplyProperties(point, command);
-            space.AppendEntity(point);
+            AppendEntity(space, point);
             transaction.AddNewlyCreatedDBObject(point, true);
             return 1;
         }
@@ -1089,7 +1115,7 @@ namespace AutoCAD.AI.Assistant.Services
                 if (table.Has(style)) text.TextStyleId = table[style];
             }
             ApplyProperties(text, command);
-            space.AppendEntity(text);
+            AppendEntity(space, text);
             transaction.AddNewlyCreatedDBObject(text, true);
             return 1;
         }
@@ -1115,7 +1141,7 @@ namespace AutoCAD.AI.Assistant.Services
                 if (table.Has(style)) mtext.TextStyleId = table[style];
             }
             ApplyProperties(mtext, command);
-            space.AppendEntity(mtext);
+            AppendEntity(space, mtext);
             transaction.AddNewlyCreatedDBObject(mtext, true);
             return 1;
         }
@@ -1197,7 +1223,7 @@ namespace AutoCAD.AI.Assistant.Services
             }
             hatch.EvaluateHatch(true);
             ApplyProperties(hatch, command);
-            space.AppendEntity(hatch);
+            AppendEntity(space, hatch);
             transaction.AddNewlyCreatedDBObject(hatch, true);
             return 1;
         }
@@ -1214,7 +1240,7 @@ namespace AutoCAD.AI.Assistant.Services
             ConfigureDimension(dimension, database);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
-            space.AppendEntity(dimension);
+            AppendEntity(space, dimension);
             transaction.AddNewlyCreatedDBObject(dimension, true);
             return 1;
         }
@@ -1230,7 +1256,7 @@ namespace AutoCAD.AI.Assistant.Services
             ConfigureDimension(dimension, database);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
-            space.AppendEntity(dimension);
+            AppendEntity(space, dimension);
             transaction.AddNewlyCreatedDBObject(dimension, true);
             return 1;
         }
@@ -1245,7 +1271,7 @@ namespace AutoCAD.AI.Assistant.Services
             ConfigureDimension(dimension, database);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
-            space.AppendEntity(dimension);
+            AppendEntity(space, dimension);
             transaction.AddNewlyCreatedDBObject(dimension, true);
             return 1;
         }
@@ -1255,12 +1281,13 @@ namespace AutoCAD.AI.Assistant.Services
         {
             var center = Point(command, "center");
             var point = Point(command, "point");
-            var dimension = new DiametricDimension(center, point, Number(command, "leader", 10), Text(command, "text"), DimensionStyle(transaction, database));
+            var opposite = center - (point - center);
+            var dimension = new DiametricDimension(opposite, point, Number(command, "leader", 10), Text(command, "text"), DimensionStyle(transaction, database));
             dimension.Layer = layer;
             ConfigureDimension(dimension, database);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
-            space.AppendEntity(dimension);
+            AppendEntity(space, dimension);
             transaction.AddNewlyCreatedDBObject(dimension, true);
             return 1;
         }

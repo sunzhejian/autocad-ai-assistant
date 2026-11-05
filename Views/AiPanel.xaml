@@ -81,7 +81,7 @@
         </ComboBox.ItemTemplate>
       </ComboBox>
       <Button Grid.Column="1" Content="＋" ToolTip="添加模型" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="AddModel_Click" />
-      <Button Grid.Column="2" Content="图" ToolTip="粘贴或选择图纸图片（Ctrl+V 亦可）" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="AttachImage_Click" />
+      <Button x:Name="AttachButton" Grid.Column="2" Content="图/PDF" ToolTip="选择图片或 PDF；Ctrl+V 可粘贴图片或文件" Style="{StaticResource SecondaryButton}" Padding="8,5" Margin="6,0,0,0" Click="AttachImage_Click" />
       <Button x:Name="ShortcutToggle" Grid.Column="3" Content="指令集" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="ShortcutToggle_Click" />
       <Button Grid.Column="4" Content="清空" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="Clear_Click" />
 
@@ -156,6 +156,7 @@
 
     <StackPanel Grid.Row="2" Margin="0,10,0,0">
       <Border x:Name="PendingBox" Visibility="Collapsed" Background="White" BorderBrush="#D8DCE3" BorderThickness="1" CornerRadius="8" Padding="7" Margin="0,0,0,6">
+        <StackPanel>
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
@@ -163,15 +164,33 @@
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
-          <Image x:Name="PendingImage" Height="54" Stretch="Uniform" HorizontalAlignment="Left" />
+          <Image x:Name="PendingImage" Height="54" MaxWidth="70" Stretch="Uniform" HorizontalAlignment="Left" />
           <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="9,0">
-            <TextBlock Text="图片已附加，可直接发送复刻" FontSize="11" Foreground="#737984" />
+            <TextBlock x:Name="PendingTitle" Text="图片已附加，可直接发送复刻" FontSize="11" Foreground="#737984" TextWrapping="Wrap" />
             <CheckBox x:Name="DetailedImageCheck" Content="精细分块（较慢）" FontSize="11" Foreground="#737984" Margin="0,5,0,0" ToolTip="大图附加四张局部高清图；单个视图优先使用框选" />
             <CheckBox x:Name="ReusePlanCheck" Content="复用已执行计划" IsChecked="True" FontSize="11" Foreground="#737984" Margin="0,5,0,0" ToolTip="同图、同提示、同模型直接复用；重新识别时取消勾选。缓存通过执行验证，源图准确性仍需核对。" />
           </StackPanel>
-          <Button Grid.Column="2" Content="框选" ToolTip="只复刻图片的一部分（如平面图）" Style="{StaticResource SecondaryButton}" Padding="8,4" Margin="0,0,6,0" VerticalAlignment="Center" Click="CropPending_Click" />
+          <Button x:Name="CropButton" Grid.Column="2" Content="框选" ToolTip="只复刻图片的一部分（如平面图）；PDF 框选后使用 AI 重建" Style="{StaticResource SecondaryButton}" Padding="8,4" Margin="0,0,6,0" VerticalAlignment="Center" Click="CropPending_Click" />
           <Button Grid.Column="3" Content="移除" Style="{StaticResource SecondaryButton}" Padding="8,4" VerticalAlignment="Center" Click="RemovePending_Click" />
         </Grid>
+        <StackPanel x:Name="PdfOptions" Visibility="Collapsed" Margin="0,7,0,0">
+          <WrapPanel VerticalAlignment="Center">
+            <TextBlock Text="页码" VerticalAlignment="Center" FontSize="11" />
+            <TextBox x:Name="PdfPageBox" Text="1" Width="42" Margin="6,0" Padding="3" />
+            <Button x:Name="PdfPageButton" Content="切换页" Style="{StaticResource SecondaryButton}" Padding="8,4" Click="PdfPage_Click" />
+          </WrapPanel>
+          <ComboBox x:Name="PdfRoute" SelectedIndex="0" Margin="0,6,0,0" SelectionChanged="PdfRoute_Changed">
+            <ComboBoxItem x:Name="NativePdfChoice" Content="原生导入：保留 PDF 矢量图形（无需模型）" />
+            <ComboBoxItem Content="AI 重建：识别当前页，生成几何与智能标注" />
+          </ComboBox>
+          <WrapPanel x:Name="PdfScaleOptions" Margin="0,6,0,0">
+            <TextBlock Text="纸面放大倍数" FontSize="11" VerticalAlignment="Center" />
+            <TextBox x:Name="PdfScaleBox" Text="1" Width="60" Margin="6,0" Padding="3" />
+            <TextBlock Text="整页含多比例视图时保持 1" FontSize="10" Foreground="#737984" VerticalAlignment="Center" />
+          </WrapPanel>
+          <TextBlock x:Name="PdfHint" TextWrapping="Wrap" FontSize="11" Foreground="#737984" Margin="0,5,0,0" />
+        </StackPanel>
+        </StackPanel>
       </Border>
       <Grid>
         <Grid.ColumnDefinitions>

@@ -1,17 +1,33 @@
 # AutoCAD AI 助手
 
-AutoCAD 2024 的按需加载插件，支持兼容 OpenAI Chat Completions 的模型、图纸图片复刻和结构化几何绘制。当前版本 **1.1.1**，.NET Framework 4.8 / Windows x64。
+AutoCAD 2024 的按需加载插件，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前版本 **1.2.0**，.NET Framework 4.8 / Windows x64。
 
 ## 使用
 
 1. 编译 Release x64，运行 `Install.ps1`，重启 AutoCAD，输入 `AI`。
 2. 配置支持视觉输入的模型；密钥使用当前 Windows 用户的 DPAPI 加密保存在本地。
-3. 粘贴或选择图纸图片。默认发送一张最长边 1600px 的增强图；单视图优先“框选”，并在输入中保留源图单位说明。
+3. 点击“图/PDF”选择文件，或用 Ctrl+V 粘贴图片/PDF 文件。图片默认发送一张最长边 1600px 的增强图；单视图优先“框选”，并在输入中保留源图单位说明。
 4. 复杂大图可勾选“精细分块”，同时发送整图和四张重叠高清图，模型处理时间可能增加。
-5. 绘图前自动校验 JSON、尺寸与几何、块依赖及指令预算；可修正一次，仍不通过则停止。绘图期间任一原生命令失败，整批回滚。完成后一次 `U` 撤销整批。
+5. 绘图前自动校验 JSON、尺寸与几何、填充边界及内孔、块依赖与指令预算；可修正一次，仍不通过则停止。生成后读取原生尺寸、填充面积与内孔数，结果不一致则整批回滚。完成后一次 `U` 撤销整批。
 6. “复用已执行计划”默认开启。相同图片内容、提示、模型配置、协议与分块模式可复用七天内的计划；取消勾选可重新识别。该缓存只证明计划曾成功执行，源图识别仍需核对。
 
 `AIPLAN` 可读取本地 JSON 计划；`AIDRAW` 为面板的绘图队列命令。请求中“发送”变为“取消”，图片请求总预算 240 秒、文本 120 秒，包含重试和自动修正。切换/关闭原图形后不会把结果画入另一张图。
+
+### PDF 赛题
+
+附加 PDF 后可输入页码并“切换页”。矢量页默认原生导入，不需要配置或调用模型；扫描页、混合页默认 AI 重建。空白页禁止发送。PDF 框选后按图片重建局部，保留整页时才可原生导入。
+
+原生导入保留整页**纸面布局**，放大倍数默认 `1`。例如单一 1:100 视图可按实际需求放大 100 倍；整页含 1:500、1:100、1:200 多种比例时，不要用一个倍数冒充各视图模型 1:1。已测试毫米到厘米的显式转换，并修正原生 PDF 英寸基准带来的 25.4 倍偏差。
+
+PDF 原生标注仍是线条和文字；字体替换可能使文字移位。混合页的位图保留为外部参照，不会自动变成线条，跨机分享需打包依赖。文字要求由 AI 重建处理；原生导入前需清空输入，以免忽略用户要求。AI 重建会收到该页预览和提取的文字证据，不能识别的 SHX 数字仍需看图核对。
+
+PDF 处理在本地独立 Python 进程中完成，依赖另行安装的 `PyMuPDF`；本机已验证 Python / PyMuPDF 1.27.2。可用 `CADAI_PYTHON` 指向 `python.exe`。不随插件分发其第三方二进制；该依赖采用 [AGPL/商业双许可](https://pymupdf.readthedocs.io/en/latest/about.html)，发行时需按实际授权处理。文件上限 128 MB，每次处理一页，45 秒超时；切换或移除附件会取消处理。页面快照、预览和哈希缓存位于本地 `sources` 目录，不上传 GitHub。
+
+### 原生结果校核
+
+本地 `%LOCALAPPDATA%\AutoCAD.AI.Assistant\receipts` 保存每次执行的 JSON 回执，包含计划/来源哈希、嵌套指令编号、对象句柄、图层、尺寸测量值、填充面积、纹理及内孔。回执核对的是**实际生成结果与计划**，`source_accuracy_verified` 保持 `false`，不把可执行性当作原图识别正确率。
+
+请求期间改动图元、单位或模型/布局，或切换/关闭图形，会停止自动落图并保留 AI 计划。v1.2.0 修复了直径标注端点导致的测量偏差，新增填充自交、回折尖刺、内孔越界、接触、重叠和嵌套检查。详见 [v1.2.0 验收记录](docs/upgrade-1.2.0-2026-11-05.md)。
 
 ### 恢复 CAD 界面
 
@@ -37,6 +53,8 @@ AutoCAD 2024 的按需加载插件，支持兼容 OpenAI Chat Completions 的模
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\Test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\Test.ps1 -BuildPlugin
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\Test-Cad.ps1
+python -m unittest discover -s tests -p test_pdf_worker.py -v
+powershell -File tools\Test-Pdf-Cad.ps1 -SourcePdf '赛题.pdf' -Page 3 -PlotPdf
 .\Install.ps1
 ```
 

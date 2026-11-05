@@ -10,3 +10,11 @@ jobs:
       - name: Validate plans, source units, image preparation, cache and HTTP behavior
         shell: powershell
         run: ./tools/Test.ps1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate PDF routing, rotation, snapshots and page limits
+        shell: powershell
+        run: |
+          python -m pip install PyMuPDF==1.27.2
+          python -m unittest discover -s tests -p test_pdf_worker.py -v

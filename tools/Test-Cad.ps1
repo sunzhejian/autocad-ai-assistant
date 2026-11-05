@@ -21,7 +21,7 @@ $trust = $scratch.Replace('\','/')
 $lines = @('FILEDIA', '0', 'CMDECHO', '1', '(setq cadai_trusted (getvar "TRUSTEDPATHS"))',
     ('(setvar "TRUSTEDPATHS" (strcat cadai_trusted ";' + $trust + '"))'), '_.NETLOAD', ('"' + $plugin.Replace('\','/') + '"'),
     '_.NETLOAD', ('"' + $testDll.Replace('\','/') + '"'), '(setvar "TRUSTEDPATHS" cadai_trusted)', 'AIPLAN', ('"' + $plan.Replace('\','/') + '"'),
-    '_.U', 'AIEMPTY', 'AIVERIFY', '_.QUIT', '_Y', '')
+    '_.U', 'AIEMPTY', 'AIVERIFY', 'AIGUARDCAPTURE', 'AIGUARDMOVE', 'AIGUARDVERIFY', '_.QUIT', '_Y', '')
 $lines | Set-Content -LiteralPath $script -Encoding ASCII
 $log = Join-Path $output 'console.log'
 & python (Join-Path $PSScriptRoot 'run_console.py') (Join-Path $AutoCADPath 'accoreconsole.exe') $script $log
@@ -30,5 +30,5 @@ Copy-Item -LiteralPath $env:CADAI_TEST_REPORT -Destination (Join-Path $output 'r
 $report = Get-Content -LiteralPath $env:CADAI_TEST_REPORT -Raw -Encoding UTF8 | ConvertFrom-Json
 $checks = @($report | Where-Object { $null -ne $_.passed })
 $checks | Select-Object test,passed | Format-Table
-if ($checks.Count -lt 6 -or @($checks | Where-Object { -not $_.passed }).Count -gt 0) { throw "Native integration failed; see $log" }
+if ($checks.Count -ne 21 -or @($checks | Where-Object { -not $_.passed }).Count -gt 0 -or @($report | Where-Object { $_.error }).Count -gt 0) { throw "Native integration failed; see $log" }
 $report | Where-Object { $null -ne $_.milliseconds } | Format-Table

@@ -210,7 +210,7 @@ namespace AutoCAD.AI.Assistant.Services
                         if (error != null) return error;
                     }
                 }
-                return null;
+                return HatchBoundaryValidator.Check(command);
             }
             if (type == "dimlinear" || type == "dim")
             {

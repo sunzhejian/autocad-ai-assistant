@@ -12,6 +12,9 @@ namespace AutoCAD.AI.Assistant.Services
         private sealed class Pending
         {
             public string Plan;
+            public PdfPageSource Pdf;
+            public double PaperScale;
+            public CadRevisionGuard Guard;
             public CancellationToken Cancellation;
             public TaskCompletionSource<string> Completion = new TaskCompletionSource<string>();
             public CancellationTokenSource Deadline;
@@ -35,16 +38,25 @@ namespace AutoCAD.AI.Assistant.Services
             };
         }
 
-        public static Task<string> Enqueue(Document document, string plan, CancellationToken cancellation)
+        public static Task<string> Enqueue(Document document, string plan, CancellationToken cancellation, CadRevisionGuard guard = null)
+        {
+            return Queue(document, new Pending { Plan = plan, Cancellation = cancellation, Guard = guard });
+        }
+
+        public static Task<string> EnqueuePdf(Document document, PdfPageSource source, double scale, CancellationToken cancellation, CadRevisionGuard guard)
+        {
+            return Queue(document, new Pending { Pdf = source, PaperScale = scale, Cancellation = cancellation, Guard = guard });
+        }
+
+        private static Task<string> Queue(Document document, Pending job)
         {
             if (document == null) throw new InvalidOperationException("没有活动图形。");
-            var job = new Pending { Plan = plan, Cancellation = cancellation };
             lock (Sync)
             {
                 if (Jobs.ContainsKey(document)) throw new InvalidOperationException("此图形已有待执行计划。");
                 Jobs.Add(document, job);
             }
-            job.Deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+            job.Deadline = CancellationTokenSource.CreateLinkedTokenSource(job.Cancellation);
             job.Registration = job.Deadline.Token.Register(delegate
             {
                 var removed = false;
@@ -70,8 +82,10 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 job.Cancellation.ThrowIfCancellationRequested();
                 job.Deadline.Token.ThrowIfCancellationRequested();
+                if (job.Guard != null) job.Guard.Verify();
                 string message;
-                if (new CadDrawingExecutor().Execute(job.Plan, out message) == null)
+                if (job.Pdf != null) message = PdfDrawingImporter.Execute(document, job.Pdf, job.PaperScale);
+                else if (new CadDrawingExecutor().Execute(job.Plan, out message) == null)
                     throw new InvalidOperationException(message);
                 job.Completion.TrySetResult(message);
             }

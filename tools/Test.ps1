@@ -6,8 +6,8 @@ try {
     $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
     New-Item -ItemType Directory -Path artifacts -Force | Out-Null
     $sources = @('tests\RegressionTests.cs', 'Models\ChatItem.cs', 'Models\ModelConfiguration.cs',
-        'Services\CadPlanText.cs', 'Services\CadPlanQuality.cs', 'Services\CadPlanValidator.cs', 'Services\CadPlanNormalizer.cs', 'Services\HatchMaterialPolicy.cs',
-        'Services\ImagePreprocessor.cs', 'Services\OpenAiCompatibleClient.cs', 'Services\SecretProtector.cs', 'Services\DiagnosticsLog.cs', 'Services\DrawingPlanCache.cs')
+        'Services\CadPlanText.cs', 'Services\CadPlanQuality.cs', 'Services\CadPlanValidator.cs', 'Services\CadPlanNormalizer.cs', 'Services\HatchMaterialPolicy.cs', 'Services\HatchBoundaryValidator.cs',
+        'Services\ImagePreprocessor.cs', 'Services\OpenAiCompatibleClient.cs', 'Services\SecretProtector.cs', 'Services\DiagnosticsLog.cs', 'Services\DrawingPlanCache.cs', 'Services\PdfSourceService.cs')
     & (Join-Path $framework 'csc.exe') /nologo /r:System.Web.Extensions.dll /r:System.Net.Http.dll /r:System.Drawing.dll /r:System.Security.dll /out:artifacts\RegressionTests.exe $sources
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed' }
     & .\artifacts\RegressionTests.exe

@@ -12,6 +12,8 @@ using AcApplication = Autodesk.AutoCAD.ApplicationServices.Application;
 public sealed class CadIntegrationTests
 {
     private static readonly List<object> Results = new List<object>();
+    private static IDisposable WaitingGuard;
+    private static string LastReceipt;
     private static string Run(string plan)
     {
         var assembly = Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL"));
@@ -19,7 +21,8 @@ public sealed class CadIntegrationTests
         var instance = Activator.CreateInstance(type, true);
         var args = new object[] { plan, null };
         var result = type.GetMethod("Execute").Invoke(instance, args);
-        Results.Add(new { result = result != null, message = Convert.ToString(args[1]) });
+        LastReceipt = Convert.ToString(type.GetProperty("LastReceiptPath").GetValue(instance, null));
+        Results.Add(new { result = result != null, message = Convert.ToString(args[1]), receipt_path = LastReceipt });
         return result == null ? null : Convert.ToString(args[1]);
     }
     private static int Count()
@@ -55,6 +58,9 @@ public sealed class CadIntegrationTests
         var before = Count();
         var cm = "{\"sourceUnit\":\"cm\",\"commands\":[{\"type\":\"standard\"},{\"type\":\"rect\",\"p1\":[0,0],\"p2\":[6000,1200]},{\"type\":\"dimlinear\",\"p1\":[0,0],\"p2\":[6000,0],\"position\":[0,-200],\"value\":600,\"confidence\":\"inferred\"}]}";
         Check(Run(cm) != null && Count() == before + 2, "cm geometry created atomically");
+        var receipt = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(LastReceipt));
+        Check(Convert.ToBoolean(receipt["native_checks_passed"]) && !Convert.ToBoolean(receipt["source_accuracy_verified"])
+            && Convert.ToInt32(receipt["dimensions"]) == 1, "receipt records native checks without claiming source accuracy");
         var db = AcApplication.DocumentManager.MdiActiveDocument.Database;
         using (var tr = db.TransactionManager.StartTransaction())
         {
@@ -79,6 +85,8 @@ public sealed class CadIntegrationTests
         Check(Run(invalid) == null && Count() == countBeforeFailure, "native failure rolls back earlier entities");
         var hole = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[{\"type\":\"hatch\",\"pattern\":\"ANSI31\",\"points\":[[0,0],[1000,0],[1000,1100],[0,1100]],\"holes\":[[[150,150],[850,150],[850,950],[150,950]]]}]}";
         Check(Run(hole) != null && Count() == countBeforeFailure + 1, "source unit hollow section created");
+        receipt = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(LastReceipt));
+        Check(Convert.ToInt32(receipt["hatches"]) == 1, "receipt includes native hatch area and holes");
         using (var tr = db.TransactionManager.StartTransaction())
         {
             var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
@@ -117,12 +125,76 @@ public sealed class CadIntegrationTests
             Check(scales.Count==4&&Math.Abs(scales[3]/scales[2]-.5)<1e-8,"material density follows enlarged paper scale");
         }
         countBeforeFailure = Count();
+        var roundDims = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[{\"type\":\"circle\",\"center\":[100,100],\"radius\":10},{\"type\":\"dimradius\",\"center\":[100,100],\"point\":[110,100],\"value\":10},{\"type\":\"dimdiameter\",\"center\":[100,100],\"point\":[110,100],\"value\":20}]}";
+        Check(Run(roundDims) != null && Count() == countBeforeFailure + 3, "radius and diameter source unit native readback");
+        var nested = "{\"commands\":[{\"type\":\"block\",\"name\":\"receipt_test\",\"commands\":[{\"type\":\"dimaligned\",\"p1\":[0,0],\"p2\":[30,40],\"position\":[-5,10],\"value\":50}]},{\"type\":\"insert\",\"name\":\"receipt_test\",\"position\":[0,0]}]}";
+        Check(Run(nested) != null && File.ReadAllText(LastReceipt).Contains("\"command\":\"1.1\""), "nested block receipt preserves command identity");
+        VerifyRevisionGuard();
+        countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");
         var timer = Stopwatch.StartNew();
         Check(Run("{\"commands\":[" + string.Join(",", commands.ToArray()) + "]}") != null && Count() == countBeforeFailure + 400, "400 command native batch");
         Results.Add(new { test = "400 command execution", milliseconds = timer.ElapsedMilliseconds });
         Save();
+    }
+
+    private static void VerifyRevisionGuard()
+    {
+        var assembly = Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL"));
+        var type = assembly.GetType("AutoCAD.AI.Assistant.Services.CadRevisionGuard", true);
+        var document = AcApplication.DocumentManager.MdiActiveDocument;
+        using (var guard = (IDisposable)Activator.CreateInstance(type, new object[] { document }))
+        {
+            type.GetMethod("Verify").Invoke(guard, null);
+            Check(true, "unchanged drawing passes revision guard");
+            Run("{\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":5}]}");
+            var rejected = false;
+            try { type.GetMethod("Verify").Invoke(guard, null); }
+            catch (TargetInvocationException ex) { rejected = ex.InnerException is InvalidOperationException; }
+            Check(rejected, "drawing edit invalidates waiting AI result");
+        }
+        var oldUnits = document.Database.Insunits;
+        using (var guard = (IDisposable)Activator.CreateInstance(type, new object[] { document }))
+        {
+            document.Database.Insunits = UnitsValue.Meters;
+            var rejected = false;
+            try { type.GetMethod("Verify").Invoke(guard, null); } catch (TargetInvocationException) { rejected = true; }
+            Check(rejected, "drawing unit change invalidates waiting AI result");
+        }
+        document.Database.Insunits = oldUnits;
+    }
+
+    [CommandMethod("AIGUARDCAPTURE")]
+    public void CaptureGuard()
+    {
+        var type = Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL")).GetType("AutoCAD.AI.Assistant.Services.CadRevisionGuard", true);
+        WaitingGuard = (IDisposable)Activator.CreateInstance(type, new object[] { AcApplication.DocumentManager.MdiActiveDocument });
+    }
+    [CommandMethod("AIGUARDMOVE")]
+    public void MoveExisting()
+    {
+        var db = AcApplication.DocumentManager.MdiActiveDocument.Database;
+        using (var tr = db.TransactionManager.StartTransaction())
+        {
+            var table = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            var space = (BlockTableRecord)tr.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            foreach (ObjectId id in space)
+            {
+                var circle = tr.GetObject(id, OpenMode.ForWrite) as Circle;
+                if (circle != null) { circle.Center = circle.Center + new Autodesk.AutoCAD.Geometry.Vector3d(1, 0, 0); break; }
+            }
+            tr.Commit();
+        }
+    }
+    [CommandMethod("AIGUARDVERIFY")]
+    public void VerifyWaiting()
+    {
+        var rejected = false;
+        try { WaitingGuard.GetType().GetMethod("Verify").Invoke(WaitingGuard, null); }
+        catch (TargetInvocationException ex) { rejected = ex.InnerException is InvalidOperationException; }
+        finally { WaitingGuard.Dispose(); WaitingGuard = null; }
+        Check(rejected, "existing object edit across commands invalidates waiting AI result");
     }
 
     [CommandMethod("AIEMPTY")]

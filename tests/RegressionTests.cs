@@ -36,19 +36,47 @@ internal static class RegressionTests
             using (var g = Graphics.FromImage(b)) { g.Clear(Color.White); g.DrawRectangle(Pens.Black, 10, 10, 180, 80); b.Save(ImagePath); }
             TestValidation();
             TestMaterials();
+            TestHatchBoundaries();
             foreach (var fixture in Directory.GetFiles("tests/fixtures", "*.json"))
             {
                 var plan = File.ReadAllText(fixture, Encoding.UTF8);
-                Check(CadPlanValidator.Validate(plan) == null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(plan)) == null,
-                    "saved drawing plan " + Path.GetFileNameWithoutExtension(fixture));
+                var error = CadPlanValidator.Validate(plan) ?? CadPlanValidator.Validate(CadPlanNormalizer.Normalize(plan));
+                Check(error == null, "saved drawing plan " + Path.GetFileNameWithoutExtension(fixture) + (error == null ? "" : ": " + error));
             }
             TestImages();
             TestCache(folder);
+            TestPdfSnapshot(folder);
             TestClient().GetAwaiter().GetResult();
             Console.WriteLine("TOTAL " + Passed + " passed"); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex); return 1; }
         finally { Directory.Delete(folder, true); }
+    }
+
+    private static void TestHatchBoundaries()
+    {
+        Func<string, string, string> hatch = (points, holes) => Plan("{\"type\":\"hatch\",\"points\":" + points + ",\"holes\":" + holes + "}");
+        var square = "[[0,0],[10,0],[10,10],[0,10]]";
+        Check(CadPlanValidator.Validate(hatch(square, "[[[2,2],[8,2],[8,8],[2,8]]]")) == null, "simple hatch with inner hole accepted");
+        Check(CadPlanValidator.Validate(hatch("[[0,0],[10,10],[0,10],[10,0]]", "[]")) != null, "self crossing hatch rejected before CAD");
+        Check(CadPlanValidator.Validate(hatch("[[0,0],[10,0],[5,0],[5,10],[0,10]]", "[]")) != null, "backtracking hatch spike rejected");
+        Check(CadPlanValidator.Validate(hatch(square, "[[[12,2],[18,2],[18,8],[12,8]]]")) != null, "outside hatch hole rejected");
+        Check(CadPlanValidator.Validate(hatch(square, "[[[0,2],[8,2],[8,8],[0,8]]]")) != null, "touching hatch hole rejected");
+        Check(CadPlanValidator.Validate(hatch(square, "[[[1,1],[7,1],[7,7],[1,7]],[[5,5],[9,5],[9,9],[5,9]]]")) != null, "overlapping hatch holes rejected");
+        Check(CadPlanValidator.Validate(hatch("[[0,0],[10,0],[10,10],[0,10],[0,0]]", "[]")) == null, "explicit hatch closure accepted");
+    }
+
+    private static void TestPdfSnapshot(string folder)
+    {
+        Check(PdfSourceService.Quote("D:\\a b\\") == "\"D:\\a b\\\\\"", "PDF process quotes trailing slash in paths");
+        Check(PdfSourceService.Quote("a\"b") == "\"a\\\"b\"", "PDF process escapes embedded quotes");
+        var path = Path.Combine(folder, "page.pdf"); File.WriteAllText(path, "source snapshot");
+        var source = new PdfPageSource { kind = "vector", pdf = path, pdf_hash = PdfPageSource.Hash(path) };
+        source.VerifySnapshot(); Check(source.CanImport, "vector PDF snapshot accepted");
+        File.WriteAllText(path, "modified snapshot");
+        try { source.VerifySnapshot(); Check(false, "PDF mutation rejected"); } catch (InvalidOperationException) { Check(true, "PDF mutation rejected"); }
+        source.kind = "raster"; source.pdf_hash = PdfPageSource.Hash(path);
+        try { source.VerifySnapshot(); Check(false, "raster PDF cannot use vector import"); } catch (InvalidOperationException) { Check(true, "raster PDF cannot use vector import"); }
     }
 
     private static void TestValidation()

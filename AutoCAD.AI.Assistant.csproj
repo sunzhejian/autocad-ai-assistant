@@ -68,6 +68,10 @@
     <Compile Include="Services\OpenAiCompatibleClient.cs" />
     <Compile Include="Services\ImagePreprocessor.cs" />
     <Compile Include="Services\CadDrawingExecutor.cs" />
+    <Compile Include="Services\CadExecutionReceipt.cs" />
+    <Compile Include="Services\CadRevisionGuard.cs" />
+    <Compile Include="Services\PdfSourceService.cs" />
+    <Compile Include="Services\PdfDrawingImporter.cs" />
     <Compile Include="Services\CadPlanValidator.cs" />
     <Compile Include="Services\CadPlanQuality.cs" />
     <Compile Include="Services\CadPlanText.cs" />
@@ -75,6 +79,7 @@
     <Compile Include="Services\DrawingPlanCache.cs" />
     <Compile Include="Services\CadPlanNormalizer.cs" />
     <Compile Include="Services\HatchMaterialPolicy.cs" />
+    <Compile Include="Services\HatchBoundaryValidator.cs" />
     <Compile Include="Services\DiagnosticsLog.cs" />
     <Compile Include="Services\ShortcutCatalog.cs" />
     <Compile Include="Services\CadCommandRecorder.cs" />
@@ -110,5 +115,6 @@
     <MakeDir Directories="$(BundleDir)\Contents" />
     <Copy SourceFiles="$(ProjectDir)Bundle\PackageContents.xml" DestinationFolder="$(BundleDir)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(BundleDir)\Contents\AutoCAD.AI.Assistant.v2.dll" />
+    <Copy SourceFiles="$(ProjectDir)tools\pdf_worker.py" DestinationFolder="$(BundleDir)\Contents" />
   </Target>
 </Project>
