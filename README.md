@@ -13,6 +13,12 @@ AutoCAD 2024 的按需加载插件，支持兼容 OpenAI Chat Completions 的模
 
 `AIPLAN` 可读取本地 JSON 计划；`AIDRAW` 为面板的绘图队列命令。请求中“发送”变为“取消”，图片请求总预算 240 秒、文本 120 秒，包含重试和自动修正。切换/关闭原图形后不会把结果画入另一张图。
 
+### 恢复 CAD 界面
+
+功能区折叠时双击当前选项卡，或点击选项卡右侧的最小化按钮展开完整面板；`Ctrl+9` 显示/隐藏命令行。打开文件变成输入路径时，将 `FILEDIA` 设为 `1`。
+
+也可用 `APPLOAD` 加载 [Restore-Cad-UI.lsp](tools/Restore-Cad-UI.lsp)，输入 `CADAIUI`，恢复菜单栏、功能区、命令行、文件选项卡、状态栏和文件对话框；它不重置配置或改动图纸，折叠的功能区仍需双击展开。
+
 ## 准确性机制
 
 图片计划声明 `sourceUnit: mm/cm/m`、`coordinateUnit: source` 和可见 `views`。模型按源图单位给出坐标，插件在本地统一换算为毫米。兼容旧的毫米坐标计划（省略 `coordinateUnit`）。高程与普通尺寸使用不同单位时，高程作为文字保留。
@@ -34,7 +40,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\Test-Cad.ps1
 .\Install.ps1
 ```
 
-纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。
+纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。2026-11-05 已在本机 2024 控制台确认隔离日志，13 项原生检查通过。
 
 ## 本地题库复刻
 
