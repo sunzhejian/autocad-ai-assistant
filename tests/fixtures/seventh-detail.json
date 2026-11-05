@@ -1,0 +1,887 @@
+{
+  "sourceUnit": "mm",
+  "views": [
+    "扭面大样图"
+  ],
+  "commands": [
+    {
+      "type": "standard"
+    },
+    {
+      "type": "layer",
+      "name": "轮廓",
+      "color": 7,
+      "linetype": "Continuous",
+      "lineweight": 0.5
+    },
+    {
+      "type": "layer",
+      "name": "细线",
+      "color": 7,
+      "linetype": "Continuous",
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "虚线",
+      "color": 7,
+      "linetype": "DASHED",
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "标注",
+      "color": 7,
+      "linetype": "Continuous",
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "文字",
+      "color": 7,
+      "linetype": "Continuous",
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "石块",
+      "color": 7,
+      "linetype": "Continuous",
+      "lineweight": 0.25
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          -2150,
+          3300
+        ],
+        [
+          -350,
+          3300
+        ],
+        [
+          -350,
+          3000
+        ],
+        [
+          150,
+          3000
+        ],
+        [
+          150,
+          3300
+        ],
+        [
+          1950,
+          3300
+        ]
+      ],
+      "closed": false,
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          -2150,
+          3300
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          150,
+          3000
+        ],
+        [
+          2300,
+          900
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1950,
+          3300
+        ],
+        [
+          1950,
+          900
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1950,
+          900
+        ],
+        [
+          3750,
+          900
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          3750,
+          900
+        ],
+        [
+          3750,
+          100
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          100,
+          100
+        ],
+        [
+          3750,
+          100
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          100,
+          100
+        ],
+        [
+          100,
+          200
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          100,
+          200
+        ],
+        [
+          2300,
+          200
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          2300,
+          200
+        ],
+        [
+          2300,
+          900
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          3750,
+          100
+        ],
+        [
+          4050,
+          100
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          4050,
+          100
+        ],
+        [
+          4050,
+          900
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          4050,
+          900
+        ],
+        [
+          3750,
+          900
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          100,
+          0
+        ],
+        [
+          100,
+          200
+        ],
+        [
+          600,
+          200
+        ],
+        [
+          1100,
+          1800
+        ],
+        [
+          1100,
+          2400
+        ]
+      ],
+      "closed": false,
+      "layer": "虚线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1950,
+          3300
+        ],
+        [
+          -1600,
+          2500
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1950,
+          3300
+        ],
+        [
+          -1200,
+          2200
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1950,
+          3300
+        ],
+        [
+          -800,
+          1900
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1950,
+          3300
+        ],
+        [
+          -400,
+          1600
+        ]
+      ],
+      "layer": "虚线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          2300,
+          900
+        ],
+        [
+          -1000,
+          1500
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          2300,
+          900
+        ],
+        [
+          -600,
+          1200
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          2300,
+          900
+        ],
+        [
+          -200,
+          900
+        ]
+      ],
+      "layer": "虚线"
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          1520,
+          2460
+        ],
+        [
+          1600,
+          2520
+        ],
+        [
+          1700,
+          2480
+        ],
+        [
+          1740,
+          2380
+        ],
+        [
+          1680,
+          2300
+        ],
+        [
+          1560,
+          2320
+        ],
+        [
+          1500,
+          2400
+        ]
+      ],
+      "closed": true,
+      "layer": "石块"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1560,
+          2400
+        ],
+        [
+          1700,
+          2400
+        ]
+      ],
+      "layer": "石块"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1600,
+          2320
+        ],
+        [
+          1620,
+          2500
+        ]
+      ],
+      "layer": "石块"
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          1120,
+          1800
+        ],
+        [
+          1200,
+          1860
+        ],
+        [
+          1300,
+          1820
+        ],
+        [
+          1340,
+          1720
+        ],
+        [
+          1280,
+          1640
+        ],
+        [
+          1160,
+          1660
+        ],
+        [
+          1100,
+          1740
+        ]
+      ],
+      "closed": true,
+      "layer": "石块"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1160,
+          1740
+        ],
+        [
+          1300,
+          1740
+        ]
+      ],
+      "layer": "石块"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          1200,
+          1660
+        ],
+        [
+          1220,
+          1840
+        ]
+      ],
+      "layer": "石块"
+    },
+    {
+      "type": "text",
+      "position": [
+        -800,
+        2650
+      ],
+      "height": 200,
+      "content": "M7.5浆砌石挡墙",
+      "layer": "文字"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          -800,
+          2550
+        ],
+        [
+          400,
+          2550
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          400,
+          2550
+        ],
+        [
+          1200,
+          2300
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "text",
+      "position": [
+        -1000,
+        2000
+      ],
+      "height": 200,
+      "content": "设计开挖线",
+      "layer": "文字"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          -1000,
+          1900
+        ],
+        [
+          -100,
+          1900
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          -100,
+          1900
+        ],
+        [
+          -400,
+          1700
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "text",
+      "position": [
+        300,
+        -700
+      ],
+      "height": 350,
+      "content": "扭面大样图",
+      "layer": "文字"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          200,
+          -850
+        ],
+        [
+          1000,
+          -850
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          200,
+          -900
+        ],
+        [
+          1000,
+          -900
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        -350,
+        3300
+      ],
+      "p2": [
+        150,
+        3300
+      ],
+      "position": [
+        -350,
+        3600
+      ],
+      "rotation": 0,
+      "value": 500,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        150,
+        3300
+      ],
+      "p2": [
+        1450,
+        3300
+      ],
+      "position": [
+        150,
+        3600
+      ],
+      "rotation": 0,
+      "value": 1300,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        1450,
+        3300
+      ],
+      "p2": [
+        1950,
+        3300
+      ],
+      "position": [
+        1450,
+        3600
+      ],
+      "rotation": 0,
+      "value": 500,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        -2150,
+        3300
+      ],
+      "p2": [
+        0,
+        0
+      ],
+      "position": [
+        -2600,
+        1650
+      ],
+      "rotation": 90,
+      "value": 3300,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        -350,
+        3300
+      ],
+      "p2": [
+        -350,
+        3000
+      ],
+      "position": [
+        -2300,
+        3150
+      ],
+      "rotation": 90,
+      "value": 300,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        -350,
+        3000
+      ],
+      "p2": [
+        600,
+        900
+      ],
+      "position": [
+        -2300,
+        1950
+      ],
+      "rotation": 90,
+      "value": 2100,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        600,
+        900
+      ],
+      "p2": [
+        100,
+        200
+      ],
+      "position": [
+        -2300,
+        550
+      ],
+      "rotation": 90,
+      "value": 700,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        100,
+        200
+      ],
+      "p2": [
+        100,
+        100
+      ],
+      "position": [
+        -2300,
+        150
+      ],
+      "rotation": 90,
+      "value": 100,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        0,
+        100
+      ],
+      "p2": [
+        100,
+        100
+      ],
+      "position": [
+        0,
+        -300
+      ],
+      "rotation": 0,
+      "value": 100,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        100,
+        100
+      ],
+      "p2": [
+        600,
+        100
+      ],
+      "position": [
+        100,
+        -300
+      ],
+      "rotation": 0,
+      "value": 500,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        600,
+        100
+      ],
+      "p2": [
+        1800,
+        100
+      ],
+      "position": [
+        600,
+        -300
+      ],
+      "rotation": 0,
+      "value": 1200,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        1800,
+        100
+      ],
+      "p2": [
+        2300,
+        100
+      ],
+      "position": [
+        1800,
+        -300
+      ],
+      "rotation": 0,
+      "value": 500,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        2300,
+        100
+      ],
+      "p2": [
+        3750,
+        100
+      ],
+      "position": [
+        2300,
+        -300
+      ],
+      "rotation": 0,
+      "value": 1450,
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        3750,
+        100
+      ],
+      "p2": [
+        4050,
+        100
+      ],
+      "position": [
+        3750,
+        -300
+      ],
+      "rotation": 0,
+      "value": 300,
+      "confidence": "read",
+      "layer": "标注"
+    }
+  ]
+}

@@ -6,6 +6,7 @@
              mc:Ignorable="d" d:DesignWidth="430" d:DesignHeight="700"
              Background="#F5F6F8">
   <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVisible" />
     <Style x:Key="PrimaryButton" TargetType="Button">
       <Setter Property="Background" Value="#202124" />
       <Setter Property="Foreground" Value="White" />
@@ -56,49 +57,80 @@
     </Style>
   </UserControl.Resources>
 
-  <Grid Margin="14">
+  <Grid Margin="10" PreviewMouseDown="Panel_PreviewMouseDown">
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <Grid Grid.Row="0" Margin="0,0,0,14">
+    <Grid Grid.Row="0" Margin="0,0,0,10">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <Border Width="38" Height="38" CornerRadius="10" Background="#202124">
-        <TextBlock Text="AI" Foreground="White" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
-      </Border>
-      <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-        <TextBlock Text="CAD AI 助手" FontSize="18" FontWeight="SemiBold" Foreground="#202124" />
-        <TextBlock Text="AutoCAD 2024 · 按需启动" FontSize="11" Foreground="#858A93" Margin="0,2,0,0" />
-      </StackPanel>
-      <Button Grid.Column="2" Content="清空" Style="{StaticResource SecondaryButton}" Padding="11,6" Click="Clear_Click" />
+      <ComboBox x:Name="ModelCombo" MinHeight="32" Padding="7,3" VerticalContentAlignment="Center">
+        <ComboBox.ItemTemplate>
+          <DataTemplate>
+            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+      <Button Grid.Column="1" Content="＋" ToolTip="添加模型" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="AddModel_Click" />
+      <Button Grid.Column="2" Content="图" ToolTip="粘贴或选择图纸图片（Ctrl+V 亦可）" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="AttachImage_Click" />
+      <Button x:Name="ShortcutToggle" Grid.Column="3" Content="指令集" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="ShortcutToggle_Click" />
+      <Button Grid.Column="4" Content="清空" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="6,0,0,0" Click="Clear_Click" />
+
+      <Popup x:Name="ShortcutPopup" PlacementTarget="{Binding ElementName=ShortcutToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+        <Border Width="390" MaxHeight="390" Background="White" BorderBrush="#D8DCE3" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,5,0,0">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="点击指令后，在绘图区按命令提示继续" FontSize="11" Foreground="#737984" Margin="2,0,0,8" />
+            <Grid Grid.Row="1" Margin="0,0,0,8">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="高频指令自动置顶" FontSize="11" Foreground="#9AA0A8" VerticalAlignment="Center" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <RadioButton x:Name="SortByCount" Content="按使用次数" GroupName="ShortcutSort" FontSize="11" VerticalAlignment="Center" Checked="SortMode_Changed" />
+                <RadioButton x:Name="SortByName" Content="按首字母" GroupName="ShortcutSort" FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0" Checked="SortMode_Changed" />
+              </StackPanel>
+            </Grid>
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+              <ItemsControl x:Name="ShortcutList">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Button Style="{StaticResource ShortcutButton}" ToolTip="{Binding Description}" Click="Shortcut_Click">
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                        <TextBlock Text="{Binding Description}" Margin="5,0,0,0" Foreground="#858A93" />
+                        <TextBlock Text="{Binding CountText}" Margin="4,0,0,0" Foreground="#B0B5BD" />
+                      </StackPanel>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Grid>
+        </Border>
+      </Popup>
     </Grid>
 
-    <Border Grid.Row="1" Background="White" BorderBrush="#E2E4E8" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,12">
+    <Border Grid.Row="1" Background="White" BorderBrush="#E2E4E8" BorderThickness="1" CornerRadius="8" Padding="10">
       <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-        <StackPanel>
-          <TextBlock Text="当前模型" FontSize="11" Foreground="#858A93" Margin="0,0,0,5" />
-          <ComboBox x:Name="ModelCombo" DisplayMemberPath="Title" MinHeight="30" VerticalContentAlignment="Center" />
-        </StackPanel>
-        <Button Grid.Column="1" Content="＋ 添加模型" Style="{StaticResource SecondaryButton}" Margin="10,16,0,0" Click="AddModel_Click" />
-      </Grid>
-    </Border>
-
-    <Border Grid.Row="2" Background="White" BorderBrush="#E2E4E8" BorderThickness="1" CornerRadius="8" Padding="10">
-      <Grid>
-        <TextBlock x:Name="EmptyText" Text="向 AI 提问，或点击下方快捷指令开始绘图。" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#9AA0A8" Margin="30" IsHitTestVisible="False" />
+        <TextBlock x:Name="EmptyText" Text="输入问题开始对话" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#9AA0A8" Margin="30" IsHitTestVisible="False" />
         <ScrollViewer x:Name="MessageScroll" VerticalScrollBarVisibility="Auto">
           <ItemsControl x:Name="MessageList">
             <ItemsControl.ItemTemplate>
@@ -106,6 +138,7 @@
                 <Border x:Name="MessageBorder" Margin="0,0,0,10" Padding="10" CornerRadius="7" Background="#F0F2F5">
                   <StackPanel>
                     <TextBlock Text="{Binding Header}" FontSize="11" FontWeight="SemiBold" Foreground="#737984" Margin="0,0,0,4" />
+                    <Image Source="{Binding ImagePath}" MaxHeight="220" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,0,0,6" Visibility="{Binding HasImage, Converter={StaticResource BoolToVisible}}" />
                     <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontSize="13" LineHeight="20" Foreground="#292B30" />
                   </StackPanel>
                 </Border>
@@ -121,37 +154,43 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="3" Background="White" BorderBrush="#E2E4E8" BorderThickness="1" CornerRadius="8" Padding="10,8" Margin="0,12,0,0">
-      <StackPanel>
-        <TextBlock Text="CAD 快捷指令 · 点击直接发送到当前图形" FontSize="11" Foreground="#737984" Margin="0,0,0,7" />
-        <ItemsControl x:Name="ShortcutList">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Button Style="{StaticResource ShortcutButton}" ToolTip="{Binding Description}" Click="Shortcut_Click">
-                <StackPanel Orientation="Horizontal">
-                  <TextBlock Text="{Binding Name}" FontWeight="Bold" />
-                  <TextBlock Text="{Binding Description}" Margin="5,0,0,0" Foreground="#858A93" />
-                </StackPanel>
-              </Button>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </StackPanel>
-    </Border>
-
-    <Grid Grid.Row="4" Margin="0,10,0,0">
+    <StackPanel Grid.Row="2" Margin="0,10,0,0">
+      <Border x:Name="PendingBox" Visibility="Collapsed" Background="White" BorderBrush="#D8DCE3" BorderThickness="1" CornerRadius="8" Padding="7" Margin="0,0,0,6">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Image x:Name="PendingImage" Height="54" Stretch="Uniform" HorizontalAlignment="Left" />
+          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="9,0">
+            <TextBlock Text="图片已附加，可直接发送复刻" FontSize="11" Foreground="#737984" />
+            <CheckBox x:Name="DetailedImageCheck" Content="精细分块（较慢）" FontSize="11" Foreground="#737984" Margin="0,5,0,0" ToolTip="大图附加四张局部高清图；单个视图优先使用框选" />
+            <CheckBox x:Name="ReusePlanCheck" Content="复用已执行计划" IsChecked="True" FontSize="11" Foreground="#737984" Margin="0,5,0,0" ToolTip="同图、同提示、同模型直接复用；重新识别时取消勾选。缓存通过执行验证，源图准确性仍需核对。" />
+          </StackPanel>
+          <Button Grid.Column="2" Content="框选" ToolTip="只复刻图片的一部分（如平面图）" Style="{StaticResource SecondaryButton}" Padding="8,4" Margin="0,0,6,0" VerticalAlignment="Center" Click="CropPending_Click" />
+          <Button Grid.Column="3" Content="移除" Style="{StaticResource SecondaryButton}" Padding="8,4" VerticalAlignment="Center" Click="RemovePending_Click" />
+        </Grid>
+      </Border>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Border Background="White" BorderBrush="#D8DCE3" BorderThickness="1" CornerRadius="8" Padding="9">
+          <TextBox x:Name="InputBox" MinHeight="58" MaxHeight="130" BorderThickness="0" Background="Transparent" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" PreviewKeyDown="InputBox_PreviewKeyDown" />
+        </Border>
+        <Button x:Name="SendButton" Grid.Column="1" Content="发送" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" VerticalAlignment="Bottom" Click="SendButton_Click" />
+      </Grid>
+    </StackPanel>
+    <Grid Grid.Row="3" Margin="2,8,2,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <Border Background="White" BorderBrush="#D8DCE3" BorderThickness="1" CornerRadius="8" Padding="9">
-        <TextBox x:Name="InputBox" MinHeight="58" MaxHeight="130" BorderThickness="0" Background="Transparent" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" PreviewKeyDown="InputBox_PreviewKeyDown" />
-      </Border>
-      <Button x:Name="SendButton" Grid.Column="1" Content="发送" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" VerticalAlignment="Bottom" Click="SendButton_Click" />
+      <TextBlock x:Name="StatusText" Text="Enter 发送 · Ctrl+V 粘贴图纸图片可自动复刻 · 绘完输入 U 撤销。" TextWrapping="Wrap" FontSize="11" Foreground="#858A93" />
+      <TextBlock Grid.Column="1" Text="诊断" FontSize="11" Foreground="#2563EB" Cursor="Hand" Margin="8,0,0,0" VerticalAlignment="Top" MouseLeftButtonUp="Diag_Click" ToolTip="导出运行日志，便于排查问题" />
     </Grid>
-    <TextBlock x:Name="StatusText" Grid.Row="5" Text="Enter 发送 · Shift+Enter 换行；AI 回复不会自动执行 CAD 命令。" TextWrapping="Wrap" FontSize="11" Foreground="#858A93" Margin="2,8,2,0" />
   </Grid>
 </UserControl>

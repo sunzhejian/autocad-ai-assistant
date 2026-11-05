@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ApplicationPackage SchemaVersion="1.0"
-                    AppVersion="1.0.0"
+                    AppVersion="1.1.0"
                     ProductCode="{6EACF5AB-67D7-4C08-9697-1FAD507F20B8}"
                     UpgradeCode="{702EE4A7-7764-4F4A-B1D1-34C10855F475}"
                     Name="AutoCAD AI Assistant"
@@ -9,12 +9,14 @@
   <Components Description="AI panel">
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.3" SeriesMax="R24.3" />
     <ComponentEntry AppName="AutoCAD.AI.Assistant"
-                    ModuleName="./Contents/AutoCAD.AI.Assistant.dll"
-                    AppDescription="AI assistant loaded only when AIPANEL is invoked"
+                    ModuleName="./Contents/AutoCAD.AI.Assistant.v2.dll"
+                    AppDescription="AI assistant loaded only when AI is invoked"
                     LoadOnAutoCADStartup="False"
                     LoadOnCommandInvocation="True">
       <Commands GroupName="CADAI">
-        <Command Global="AIPANEL" Local="AIPANEL" Description="打开 AI 助手面板" />
+        <Command Global="AI" Local="AI" Description="打开 AI 助手面板" />
+        <Command Global="AIDRAW" Local="AIDRAW" Description="执行 AI 绘图队列" />
+        <Command Global="AIPLAN" Local="AIPLAN" Description="执行本地 JSON 绘图计划" />
       </Commands>
     </ComponentEntry>
   </Components>

@@ -1,0 +1,257 @@
+{
+  "sourceUnit": "cm",
+  "coordinateUnit": "source",
+  "views": [
+    "3-3断面"
+  ],
+  "commands": [
+    {
+      "type": "layer",
+      "name": "轮廓",
+      "color": 7,
+      "lineweight": 0.5
+    },
+    {
+      "type": "layer",
+      "name": "填充",
+      "color": 8,
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "中心线",
+      "color": 7,
+      "linetype": "CENTER",
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "尺寸",
+      "color": 7,
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "文字",
+      "color": 7,
+      "lineweight": 0.25
+    },
+    {
+      "type": "setvar",
+      "name": "DIMTXT",
+      "value": 35
+    },
+    {
+      "type": "setvar",
+      "name": "DIMASZ",
+      "value": 15
+    },
+    {
+      "type": "setvar",
+      "name": "DIMEXE",
+      "value": 10
+    },
+    {
+      "type": "setvar",
+      "name": "DIMEXO",
+      "value": 10
+    },
+    {
+      "type": "rect",
+      "p1": [
+        0,
+        0
+      ],
+      "p2": [
+        1000,
+        1100
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "rect",
+      "p1": [
+        150,
+        150
+      ],
+      "p2": [
+        850,
+        950
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "hatch",
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          1000,
+          0
+        ],
+        [
+          1000,
+          1100
+        ],
+        [
+          0,
+          1100
+        ]
+      ],
+      "holes": [
+        [
+          [
+            150,
+            150
+          ],
+          [
+            850,
+            150
+          ],
+          [
+            850,
+            950
+          ],
+          [
+            150,
+            950
+          ]
+        ]
+      ],
+      "pattern": "ANSI31",
+      "scale": 1,
+      "angle": 0,
+      "layer": "填充"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          -100,
+          550
+        ],
+        [
+          1100,
+          550
+        ]
+      ],
+      "layer": "中心线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          500,
+          -100
+        ],
+        [
+          500,
+          1200
+        ]
+      ],
+      "layer": "中心线"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        0,
+        1100
+      ],
+      "p2": [
+        1000,
+        1100
+      ],
+      "position": [
+        500,
+        1250
+      ],
+      "rotation": 0,
+      "value": 1000,
+      "confidence": "read",
+      "layer": "尺寸"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        150,
+        950
+      ],
+      "p2": [
+        850,
+        950
+      ],
+      "position": [
+        500,
+        900
+      ],
+      "rotation": 0,
+      "value": 700,
+      "confidence": "read",
+      "layer": "尺寸"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        850,
+        150
+      ],
+      "p2": [
+        850,
+        950
+      ],
+      "position": [
+        1080,
+        550
+      ],
+      "rotation": 90,
+      "value": 800,
+      "confidence": "read",
+      "layer": "尺寸"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        1000,
+        0
+      ],
+      "p2": [
+        1000,
+        1100
+      ],
+      "position": [
+        1250,
+        550
+      ],
+      "rotation": 90,
+      "value": 1100,
+      "confidence": "read",
+      "layer": "尺寸"
+    },
+    {
+      "type": "text",
+      "position": [
+        390,
+        -250
+      ],
+      "height": 120,
+      "content": "3-3",
+      "layer": "文字"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          360,
+          -320
+        ],
+        [
+          640,
+          -320
+        ]
+      ],
+      "layer": "轮廓"
+    }
+  ]
+}

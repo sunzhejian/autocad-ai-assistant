@@ -4,3 +4,9 @@ dist/
 .vs/
 *.user
 *.suo
+tmp/
+artifacts/
+startup-backup/
+*.log
+**/__pycache__/
+models.json

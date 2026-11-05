@@ -1,0 +1,943 @@
+{
+  "sourceUnit": "cm",
+  "views": [
+    "纵剖视图",
+    "平面图",
+    "A-A断面图",
+    "B-B断面图"
+  ],
+  "commands": [
+    {
+      "type": "standard"
+    },
+    {
+      "type": "frame",
+      "size": "A3",
+      "title": "渠道出水口",
+      "scale": "1:100",
+      "number": "01",
+      "company": "第五届高教杯全国大学生先进成图技术大赛",
+      "date": ""
+    },
+    {
+      "type": "layer",
+      "name": "轮廓",
+      "color": 7,
+      "lineweight": 0.5
+    },
+    {
+      "type": "layer",
+      "name": "细线",
+      "color": 7,
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "中心线",
+      "color": 1,
+      "linetype": "CENTER",
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "标注",
+      "color": 7,
+      "lineweight": 0.25
+    },
+    {
+      "type": "layer",
+      "name": "剖面",
+      "color": 7,
+      "lineweight": 0.25
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          10000,
+          15000
+        ],
+        [
+          16000,
+          15000
+        ],
+        [
+          16000,
+          18150
+        ],
+        [
+          10000,
+          18150
+        ]
+      ],
+      "closed": true,
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          10000,
+          15340
+        ],
+        [
+          16000,
+          15340
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          10550,
+          15000
+        ],
+        [
+          10550,
+          15340
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          10600,
+          15000
+        ],
+        [
+          10600,
+          15340
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "spline",
+      "points": [
+        [
+          10000,
+          15000
+        ],
+        [
+          9930,
+          15600
+        ],
+        [
+          10080,
+          16200
+        ],
+        [
+          9920,
+          16800
+        ],
+        [
+          10070,
+          17400
+        ],
+        [
+          10000,
+          18150
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          16000,
+          15340
+        ],
+        [
+          16300,
+          16190
+        ]
+      ],
+      "layer": "轮廓"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          16000,
+          15540
+        ],
+        [
+          16300,
+          16390
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          16000,
+          15740
+        ],
+        [
+          16300,
+          16590
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          16000,
+          15940
+        ],
+        [
+          16300,
+          16790
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "text",
+      "position": [
+        13500,
+        16800
+      ],
+      "height": 300,
+      "content": "扭曲面",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        13000,
+        19100
+      ],
+      "height": 350,
+      "content": "纵剖视图",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        10000,
+        15000
+      ],
+      "p2": [
+        16000,
+        15000
+      ],
+      "position": [
+        13000,
+        14300
+      ],
+      "rotation": 0,
+      "value": "600",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        16000,
+        15000
+      ],
+      "p2": [
+        16000,
+        18150
+      ],
+      "position": [
+        16800,
+        16575
+      ],
+      "rotation": 90,
+      "value": "315",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        16000,
+        15340
+      ],
+      "p2": [
+        16000,
+        16190
+      ],
+      "position": [
+        16400,
+        15765
+      ],
+      "rotation": 90,
+      "value": "85",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        10000,
+        15000
+      ],
+      "p2": [
+        10000,
+        15340
+      ],
+      "position": [
+        9500,
+        15170
+      ],
+      "rotation": 90,
+      "value": "34",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        10000,
+        15340
+      ],
+      "p2": [
+        10550,
+        15340
+      ],
+      "position": [
+        10275,
+        14800
+      ],
+      "rotation": 0,
+      "value": "55",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        10550,
+        15340
+      ],
+      "p2": [
+        10600,
+        15340
+      ],
+      "position": [
+        10575,
+        14800
+      ],
+      "rotation": 0,
+      "value": "5",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          9500,
+          5500
+        ],
+        [
+          16500,
+          5500
+        ]
+      ],
+      "layer": "中心线"
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          10000,
+          3575
+        ],
+        [
+          14000,
+          2275
+        ],
+        [
+          16000,
+          2275
+        ],
+        [
+          16000,
+          8725
+        ],
+        [
+          14000,
+          8725
+        ],
+        [
+          10000,
+          7425
+        ]
+      ],
+      "closed": true,
+      "layer": "轮廓"
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          10000,
+          3975
+        ],
+        [
+          14000,
+          2675
+        ],
+        [
+          16000,
+          2675
+        ],
+        [
+          16000,
+          8325
+        ],
+        [
+          14000,
+          8325
+        ],
+        [
+          10000,
+          7025
+        ]
+      ],
+      "closed": true,
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          10000,
+          3575
+        ],
+        [
+          14000,
+          8725
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          10000,
+          7425
+        ],
+        [
+          14000,
+          2275
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          12000,
+          2450
+        ],
+        [
+          12000,
+          8550
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          11500,
+          2900
+        ],
+        [
+          11500,
+          8100
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "text",
+      "position": [
+        11350,
+        8200
+      ],
+      "height": 300,
+      "content": "A",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        11350,
+        2700
+      ],
+      "height": 300,
+      "content": "A",
+      "layer": "标注"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          12800,
+          2500
+        ],
+        [
+          12800,
+          8500
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "text",
+      "position": [
+        12650,
+        8600
+      ],
+      "height": 300,
+      "content": "C",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        12650,
+        2300
+      ],
+      "height": 300,
+      "content": "C",
+      "layer": "标注"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          13500,
+          2300
+        ],
+        [
+          13500,
+          8700
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "text",
+      "position": [
+        13350,
+        8800
+      ],
+      "height": 300,
+      "content": "D",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        13350,
+        2100
+      ],
+      "height": 300,
+      "content": "D",
+      "layer": "标注"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          14800,
+          2100
+        ],
+        [
+          14800,
+          8900
+        ]
+      ],
+      "layer": "细线"
+    },
+    {
+      "type": "text",
+      "position": [
+        14650,
+        9000
+      ],
+      "height": 300,
+      "content": "B",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        14650,
+        1900
+      ],
+      "height": 300,
+      "content": "B",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        13000,
+        9400
+      ],
+      "height": 350,
+      "content": "平面图",
+      "layer": "标注"
+    },
+    {
+      "type": "line",
+      "points": [
+        [
+          25000,
+          18400
+        ],
+        [
+          25000,
+          22600
+        ]
+      ],
+      "layer": "中心线"
+    },
+    {
+      "type": "polyline",
+      "points": [
+        [
+          23800,
+          19340
+        ],
+        [
+          24200,
+          22000
+        ],
+        [
+          22700,
+          22000
+        ],
+        [
+          22400,
+          19000
+        ],
+        [
+          26250,
+          19000
+        ],
+        [
+          28850,
+          22000
+        ],
+        [
+          28400,
+          22000
+        ],
+        [
+          25800,
+          19340
+        ]
+      ],
+      "closed": true,
+      "layer": "轮廓"
+    },
+    {
+      "type": "hatch",
+      "points": [
+        [
+          23800,
+          19340
+        ],
+        [
+          24200,
+          22000
+        ],
+        [
+          22700,
+          22000
+        ],
+        [
+          22400,
+          19000
+        ],
+        [
+          23800,
+          19000
+        ]
+      ],
+      "pattern": "ANSI31",
+      "layer": "剖面"
+    },
+    {
+      "type": "hatch",
+      "points": [
+        [
+          25800,
+          19340
+        ],
+        [
+          28400,
+          22000
+        ],
+        [
+          28850,
+          22000
+        ],
+        [
+          26250,
+          19000
+        ],
+        [
+          25800,
+          19000
+        ]
+      ],
+      "pattern": "ANSI31",
+      "layer": "剖面"
+    },
+    {
+      "type": "hatch",
+      "points": [
+        [
+          23800,
+          19000
+        ],
+        [
+          25800,
+          19000
+        ],
+        [
+          25800,
+          19340
+        ],
+        [
+          23800,
+          19340
+        ]
+      ],
+      "pattern": "ANSI31",
+      "layer": "剖面"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        22400,
+        22000
+      ],
+      "p2": [
+        22700,
+        22000
+      ],
+      "position": [
+        22550,
+        22700
+      ],
+      "rotation": 0,
+      "value": "30",
+      "confidence": "inferred",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        22700,
+        22000
+      ],
+      "p2": [
+        24200,
+        22000
+      ],
+      "position": [
+        23450,
+        22700
+      ],
+      "rotation": 0,
+      "value": "150",
+      "confidence": "inferred",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        24200,
+        22000
+      ],
+      "p2": [
+        28400,
+        22000
+      ],
+      "position": [
+        26300,
+        22700
+      ],
+      "rotation": 0,
+      "value": "420",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        28400,
+        22000
+      ],
+      "p2": [
+        28850,
+        22000
+      ],
+      "position": [
+        28625,
+        22700
+      ],
+      "rotation": 0,
+      "value": "45",
+      "confidence": "inferred",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        22400,
+        19000
+      ],
+      "p2": [
+        23800,
+        19000
+      ],
+      "position": [
+        23100,
+        18400
+      ],
+      "rotation": 0,
+      "value": "140",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        23800,
+        19000
+      ],
+      "p2": [
+        25000,
+        19000
+      ],
+      "position": [
+        24400,
+        18400
+      ],
+      "rotation": 0,
+      "value": "120",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        25000,
+        19000
+      ],
+      "p2": [
+        25800,
+        19000
+      ],
+      "position": [
+        25400,
+        18400
+      ],
+      "rotation": 0,
+      "value": "80",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        25800,
+        19000
+      ],
+      "p2": [
+        26250,
+        19000
+      ],
+      "position": [
+        26025,
+        18400
+      ],
+      "rotation": 0,
+      "value": "45",
+      "confidence": "inferred",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        22400,
+        19000
+      ],
+      "p2": [
+        25000,
+        19000
+      ],
+      "position": [
+        23700,
+        17800
+      ],
+      "rotation": 0,
+      "value": "260",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "dimlinear",
+      "p1": [
+        25000,
+        19000
+      ],
+      "p2": [
+        26250,
+        19000
+      ],
+      "position": [
+        25625,
+        17800
+      ],
+      "rotation": 0,
+      "value": "125",
+      "confidence": "read",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        24000,
+        23500
+      ],
+      "height": 350,
+      "content": "A—A",
+      "layer": "标注"
+    },
+    {
+      "type": "text",
+      "position": [
+        26800,
+        23500
+      ],
+      "height": 350,
+      "content": "B—B",
+      "layer": "标注"
+    }
+  ]
+}

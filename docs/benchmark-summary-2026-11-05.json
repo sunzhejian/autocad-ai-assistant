@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "fifth-channel",
+      "model_seconds": 181.08,
+      "commands": 60,
+      "native_entities": 73,
+      "sourceUnit": "cm",
+      "native_dimensions": 16,
+      "selected_readings_checked": 0,
+      "selected_readings_matched": 0,
+      "estimated_dimensions": 4,
+      "note": "整图只检查单位与可见视图列表，不将计划校验通过计为识图准确率。"
+    },
+    {
+      "id": "sixth-section33",
+      "model_seconds": 45.537,
+      "commands": 20,
+      "native_entities": 11,
+      "sourceUnit": "cm",
+      "native_dimensions": 4,
+      "selected_readings_checked": 4,
+      "selected_readings_matched": 4,
+      "estimated_dimensions": 0,
+      "note": "四个明确标注的尺寸；外截面1000×1100cm，内孔700×800cm。"
+    },
+    {
+      "id": "seventh-detail",
+      "model_seconds": 199.683,
+      "commands": 57,
+      "native_entities": 50,
+      "sourceUnit": "mm",
+      "native_dimensions": 14,
+      "selected_readings_checked": 13,
+      "selected_readings_matched": 13,
+      "estimated_dimensions": 0,
+      "note": "只对清楚可辨的13个标注做多重集核对；中部竖向小字需人工复核，不计为正确。"
+    }
+  ],
+  "baseline_fifth_seconds": 180.457,
+  "baseline_fifth_commands": 131,
+  "cache_median_lookup_ms": 3.3568000000000002,
+  "cache_samples": 25,
+  "native_tests_passed": 9,
+  "native_400_commands_ms": 51,
+  "limitations": [
+    "单次/少量模型样本，不能推出总体准确率或首轮整图提速。",
+    "第七届中部竖向小字及尺寸链仍需复核。",
+    "全图含小字、复杂扭面及材质纹理存在遗漏和简化。",
+    "缓存复用已执行计划，不训练模型权重，也不把识图误差自动判为正确。"
+  ]
+}

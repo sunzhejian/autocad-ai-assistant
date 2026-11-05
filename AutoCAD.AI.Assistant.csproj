@@ -66,8 +66,22 @@
     <Compile Include="Services\SecretProtector.cs" />
     <Compile Include="Services\ModelSettingsStore.cs" />
     <Compile Include="Services\OpenAiCompatibleClient.cs" />
+    <Compile Include="Services\ImagePreprocessor.cs" />
+    <Compile Include="Services\CadDrawingExecutor.cs" />
+    <Compile Include="Services\CadPlanValidator.cs" />
+    <Compile Include="Services\CadPlanQuality.cs" />
+    <Compile Include="Services\CadPlanText.cs" />
+    <Compile Include="Services\CadExecutionQueue.cs" />
+    <Compile Include="Services\DrawingPlanCache.cs" />
+    <Compile Include="Services\CadPlanNormalizer.cs" />
+    <Compile Include="Services\DiagnosticsLog.cs" />
+    <Compile Include="Services\ShortcutCatalog.cs" />
+    <Compile Include="Services\CadCommandRecorder.cs" />
     <Compile Include="Views\AiPanel.xaml.cs">
       <DependentUpon>AiPanel.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Views\ImageCropWindow.xaml.cs">
+      <DependentUpon>ImageCropWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="Views\ModelSettingsWindow.xaml.cs">
       <DependentUpon>ModelSettingsWindow.xaml</DependentUpon>
@@ -82,11 +96,18 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="Views\ImageCropWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>if not exist "$(ProjectDir)dist\AutoCAD.AI.Assistant.bundle\Contents" mkdir "$(ProjectDir)dist\AutoCAD.AI.Assistant.bundle\Contents"
-copy /y "$(ProjectDir)Bundle\PackageContents.xml" "$(ProjectDir)dist\AutoCAD.AI.Assistant.bundle\PackageContents.xml"
-copy /y "$(TargetPath)" "$(ProjectDir)dist\AutoCAD.AI.Assistant.bundle\Contents\AutoCAD.AI.Assistant.dll"</PostBuildEvent>
+    <BundleDir>$(ProjectDir)dist\AutoCAD.AI.Assistant.bundle</BundleDir>
   </PropertyGroup>
+  <Target Name="PublishBundle" AfterTargets="Build">
+    <MakeDir Directories="$(BundleDir)\Contents" />
+    <Copy SourceFiles="$(ProjectDir)Bundle\PackageContents.xml" DestinationFolder="$(BundleDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(BundleDir)\Contents\AutoCAD.AI.Assistant.v2.dll" />
+  </Target>
 </Project>

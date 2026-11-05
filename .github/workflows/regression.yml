@@ -1,0 +1,12 @@
+name: Drawing workflow regression
+on:
+  push:
+  pull_request:
+jobs:
+  pure-regression:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate plans, source units, image preparation, cache and HTTP behavior
+        shell: powershell
+        run: ./tools/Test.ps1
