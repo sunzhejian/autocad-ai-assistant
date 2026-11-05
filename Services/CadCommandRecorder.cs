@@ -9,17 +9,42 @@ namespace AutoCAD.AI.Assistant.Services
     {
         private static bool _attached;
         private static Document _current;
+        public static bool IsAttached { get { return _attached; } }
 
         public static void Attach()
         {
+            if (!ShortcutCatalog.UsageTrackingEnabled) { Detach(); return; }
             if (_attached) return;
             _attached = true;
             ShortcutCatalog.GetSorted();
 
             var manager = AcApplication.DocumentManager;
             manager.DocumentActivated += OnDocumentActivated;
+            manager.DocumentToBeDestroyed += OnDocumentClosing;
             if (manager.MdiActiveDocument != null) Hook(manager.MdiActiveDocument);
         }
+
+        public static void Detach()
+        {
+            if (!_attached) return;
+            _attached = false;
+            try
+            {
+                AcApplication.DocumentManager.DocumentActivated -= OnDocumentActivated;
+                AcApplication.DocumentManager.DocumentToBeDestroyed -= OnDocumentClosing;
+            }
+            catch { }
+            Unhook();
+            ShortcutCatalog.Flush();
+        }
+        private static void Unhook()
+        {
+            if (_current == null) return;
+            try { _current.CommandWillStart -= OnCommandWillStart; } catch { }
+            _current = null;
+        }
+        private static void OnDocumentClosing(object sender, DocumentCollectionEventArgs e)
+        { if (e.Document == _current) Unhook(); }
 
         private static void OnDocumentActivated(object sender, DocumentCollectionEventArgs e)
         {
@@ -29,16 +54,7 @@ namespace AutoCAD.AI.Assistant.Services
         private static void Hook(Document document)
         {
             if (document == null || _current == document) return;
-            if (_current != null)
-            {
-                try
-                {
-                    _current.CommandWillStart -= OnCommandWillStart;
-                }
-                catch
-                {
-                }
-            }
+            Unhook();
             _current = document;
             document.CommandWillStart += OnCommandWillStart;
         }

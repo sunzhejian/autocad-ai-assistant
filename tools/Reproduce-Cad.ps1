@@ -9,6 +9,7 @@ New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 $plugin = Join-Path $scratch 'AutoCAD.AI.Assistant.dll'
 Copy-Item -LiteralPath (Join-Path $root 'bin\Release\AutoCAD.AI.Assistant.dll') -Destination $plugin
 $env:CADAI_PLUGIN_DLL = $plugin
+$env:CADAI_DATA_DIR = Join-Path $scratch 'plugin-data'
 $env:CADAI_TEST_REPORT = Join-Path $scratch 'report.json'
 $env:CADAI_REPRO_PLAN = Join-Path $scratch 'plan.json'
 $env:CADAI_REPRO_OUTPUT = Join-Path $scratch $Name

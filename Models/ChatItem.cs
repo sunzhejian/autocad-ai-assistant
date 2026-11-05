@@ -33,10 +33,12 @@ namespace AutoCAD.AI.Assistant.Models
             {
                 _content = value;
                 Raise("Content");
+                Raise("DisplayContent");
             }
         }
 
         public string ImagePath { get; set; }
+        public string DisplayContent { get { return AutoCAD.AI.Assistant.Services.ChatRetention.Display(_content); } }
         public bool IsUser { get; set; }
         public DateTime CreatedAt { get; set; }
 

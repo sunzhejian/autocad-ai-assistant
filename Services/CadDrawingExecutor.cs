@@ -259,7 +259,6 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 try
                 {
-                    AcApplication.SetSystemVariable("LWDISPLAY", 1);
                     document.Editor.Regen();
                     // Zoom through the view API: a queued ZOOM command would consume the next undo step.
                     ZoomToExtents(document);
@@ -486,13 +485,6 @@ namespace AutoCAD.AI.Assistant.Services
             database.Dimstyle = dimTable["SL73"];
             database.SetDimstyleData((DimStyleTableRecord)transaction.GetObject(dimTable["SL73"], OpenMode.ForRead));
             database.Dimscale = previousScale;
-            try
-            {
-                AcApplication.SetSystemVariable("LWDISPLAY", 1);
-            }
-            catch
-            {
-            }
             layers.Add("粗实线");
             layers.Add("细实线");
             layers.Add("点画线");

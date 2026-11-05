@@ -29,11 +29,16 @@ internal static class RegressionTests
     {
         var folder = Path.Combine(Path.GetTempPath(), "cadai-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
+        Environment.SetEnvironmentVariable("CADAI_DATA_DIR", Path.Combine(folder, "plugin-data"));
         ImagePath = Path.Combine(folder, "scan.png");
         try
         {
             using (var b = new Bitmap(200, 100))
             using (var g = Graphics.FromImage(b)) { g.Clear(Color.White); g.DrawRectangle(Pens.Black, 10, 10, 180, 80); b.Save(ImagePath); }
+            TestBackgroundWork();
+            TestShortcutPersistence();
+            TestChatRetention();
+            TestBufferedLogs();
             TestValidation();
             TestMaterials();
             TestHatchBoundaries();
@@ -50,7 +55,98 @@ internal static class RegressionTests
             Console.WriteLine("TOTAL " + Passed + " passed"); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex); return 1; }
-        finally { Directory.Delete(folder, true); }
+        finally
+        {
+            ShortcutCatalog.FlushAsync().Wait(5000); DiagnosticsLog.FlushAsync().Wait(5000);
+            Directory.Delete(folder, true);
+        }
+    }
+
+    private static void TestBackgroundWork()
+    {
+        var caller = Thread.CurrentThread.ManagedThreadId;
+        using (var worker = new BackgroundWork(60000))
+        {
+            var writes = 0; var latest = -1; var writerThread = caller;
+            for (var i = 0; i < 1000; i++) { var value = i; worker.Request(() => { writes++; latest = value; writerThread = Thread.CurrentThread.ManagedThreadId; }); }
+            worker.FlushAsync().GetAwaiter().GetResult();
+            Check(writes == 1 && latest == 999 && writerThread != caller, "1000 persistence updates coalesce off the calling thread");
+            using (var entered = new ManualResetEventSlim())
+            using (var release = new ManualResetEventSlim())
+            {
+                worker.Request(() => { entered.Set(); release.Wait(5000); });
+                var flush = worker.FlushAsync();
+                Check(entered.Wait(5000) && !flush.IsCompleted, "slow persistence does not block the caller");
+                worker.Request(() => { latest = 1000; writes++; });
+                worker.Request(() => { latest = 2000; writes++; });
+                release.Set(); flush.GetAwaiter().GetResult();
+                Check(latest == 2000 && writes == 2, "updates during a write are drained without overlapping writers");
+            }
+            worker.Request(() => { throw new IOException("simulated disk error"); }); worker.FlushAsync().Wait();
+            Check(worker.LastError != null, "persistence failure is reported without throwing on the caller");
+            worker.Request(() => { }); worker.FlushAsync().Wait();
+            Check(worker.LastError == null, "persistence recovers on a later write");
+        }
+    }
+
+    private static void TestShortcutPersistence()
+    {
+        Check(!ShortcutCatalog.UsageTrackingEnabled, "command usage tracking defaults to off");
+        var switches = 0;
+        Action onSwitch = () => switches++;
+        ShortcutCatalog.UsageTrackingChanged += onSwitch;
+        ShortcutCatalog.SetUsageTracking(true);
+        var timer = Stopwatch.StartNew();
+        for (var i = 0; i < 10000; i++) ShortcutCatalog.RecordCommand("LINE");
+        Console.WriteLine("PERF 10000 command counters queued in " + timer.ElapsedMilliseconds + "ms");
+        ShortcutCatalog.RecordCommand("ZOOM"); ShortcutCatalog.RecordCommand("PAN");
+        ShortcutCatalog.FlushAsync().GetAwaiter().GetResult();
+        var file = Path.Combine(DiagnosticsLog.Folder, "shortcuts.json");
+        var root = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(file));
+        Func<int> count = () => ShortcutCatalog.GetSorted().Find(x => x.Command.Contains("LINE ")).UsageCount;
+        Check(count() == 10000 && root.ContainsKey("recordUsage"), "batched shortcut counts are persisted without loss");
+        var copy = ShortcutCatalog.GetSorted(); copy.Find(x => x.Command.Contains("LINE ")).UsageCount = -1;
+        Check(count() == 10000, "shortcut views do not share mutable persistence records");
+        using (var locked = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            ShortcutCatalog.RecordCommand("LINE"); ShortcutCatalog.FlushAsync().Wait();
+            Check(ShortcutCatalog.PersistenceError != null, "locked shortcut file does not block or erase counts");
+        }
+        ShortcutCatalog.FlushAsync().Wait();
+        Check(ShortcutCatalog.PersistenceError == null && File.ReadAllText(file).Contains("10001"), "shortcut persistence retries the unsaved revision");
+        ShortcutCatalog.SetUsageTracking(false); ShortcutCatalog.RecordCommand("LINE"); ShortcutCatalog.FlushAsync().Wait();
+        Check(count() == 10001, "disabled command tracking does not update counts");
+        Check(switches == 2, "command counters do not re-enter listener lifecycle updates");
+        ShortcutCatalog.UsageTrackingChanged -= onSwitch;
+    }
+
+    private static void TestChatRetention()
+    {
+        var visible = new List<ChatItem>(); var history = new List<ChatItem>();
+        for (var i = 0; i < 200; i++)
+        {
+            var item = new ChatItem { Content = "message-" + i };
+            ChatRetention.Append(visible, item, ChatRetention.VisibleLimit); ChatRetention.Append(history, item, ChatRetention.HistoryLimit);
+        }
+        Check(visible.Count == 40 && visible[0].Content == "message-160", "visible chat retains only 40 recent messages");
+        Check(history.Count == 12 && history[history.Count - 1].Content == "message-199", "model history retains the latest 12 full messages");
+        var text = new string('x', 20000); var longItem = new ChatItem { Content = text };
+        Check(longItem.Content == text && longItem.DisplayContent.Length < 8200, "large message layout is capped without truncating model content");
+    }
+
+    private static void TestBufferedLogs()
+    {
+        Directory.CreateDirectory(DiagnosticsLog.Folder);
+        using (var locked = new FileStream(DiagnosticsLog.FilePath, FileMode.Create, FileAccess.ReadWrite, FileShare.Read))
+        {
+            for (var i = 0; i < 1200; i++) DiagnosticsLog.Write("buffer-" + i);
+            DiagnosticsLog.FlushAsync().Wait();
+            Check(locked.Length == 0 && DiagnosticsLog.Snapshot().Contains("buffer-1199"), "locked log keeps an in-memory diagnostic snapshot");
+        }
+        DiagnosticsLog.FlushAsync().Wait();
+        var lines = File.ReadAllLines(DiagnosticsLog.FilePath);
+        Check(lines.Length == 1000 && lines[lines.Length - 1].Contains("buffer-1199"), "bounded log batch retries after the file becomes writable");
+        Check(!DiagnosticsLog.Snapshot().Contains("buffer-0") && DiagnosticsLog.Snapshot().Contains("buffer-1199"), "diagnostic snapshot retains only recent messages");
     }
 
     private static void TestHatchBoundaries()

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace AutoCAD.AI.Assistant.Services
 {
@@ -15,11 +16,17 @@ namespace AutoCAD.AI.Assistant.Services
         private const long MaxBytes = 512 * 1024;
         private static readonly object Sync = new object();
         private static readonly Queue<string> Buffer = new Queue<string>();
+        private sealed class LogLine { public long Sequence; public string Text; }
+        private static readonly Queue<LogLine> Pending = new Queue<LogLine>();
+        private static long _sequence;
+        private static readonly BackgroundWork Writer = new BackgroundWork(750);
 
         public static string Folder
         {
             get
             {
+                var testFolder = Environment.GetEnvironmentVariable("CADAI_DATA_DIR");
+                if (!String.IsNullOrWhiteSpace(testFolder)) return Path.GetFullPath(testFolder);
                 return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoCAD.AI.Assistant");
             }
         }
@@ -32,25 +39,28 @@ namespace AutoCAD.AI.Assistant.Services
         public static void Write(string message)
         {
             if (string.IsNullOrEmpty(message)) return;
-            var line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + message;
+            var line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + (message.Length > 8192 ? message.Substring(0, 8192) + "…" : message);
             lock (Sync)
             {
                 Buffer.Enqueue(line);
                 while (Buffer.Count > Capacity) Buffer.Dequeue();
-                try
-                {
-                    if (!Directory.Exists(Folder)) Directory.CreateDirectory(Folder);
-                    Trim();
-                    using (var stream = new StreamWriter(FilePath, true, Encoding.UTF8))
-                    {
-                        stream.WriteLine(line);
-                    }
-                }
-                catch
-                {
-                }
+                Pending.Enqueue(new LogLine { Sequence = ++_sequence, Text = line });
+                while (Pending.Count > 1000) Pending.Dequeue();
             }
+            Writer.Request(WriteBatch);
         }
+
+        private static void WriteBatch()
+        {
+            LogLine[] lines;
+            lock (Sync) lines = Pending.ToArray();
+            if (lines.Length == 0) return;
+            Directory.CreateDirectory(Folder); Trim();
+            using (var stream = new StreamWriter(FilePath, true, Encoding.UTF8))
+                foreach (var line in lines) stream.WriteLine(line.Text);
+            lock (Sync) while (Pending.Count > 0 && Pending.Peek().Sequence <= lines[lines.Length - 1].Sequence) Pending.Dequeue();
+        }
+        public static Task FlushAsync() { Writer.Request(WriteBatch); return Writer.FlushAsync(); }
 
         public static void Error(string scope, Exception ex)
         {
@@ -88,28 +98,25 @@ namespace AutoCAD.AI.Assistant.Services
         /// <summary>导出诊断包（日志副本 + 环境信息），返回文件路径。</summary>
         public static string Export()
         {
-            lock (Sync)
+            try
             {
-                try
-                {
-                    if (!Directory.Exists(Folder)) Directory.CreateDirectory(Folder);
-                    var file = Path.Combine(Folder, "diagnostics_" + DateTime.Now.ToString("yyyyMMddHHmmss") + ".txt");
-                    var text = new StringBuilder();
-                    text.AppendLine("AutoCAD.AI.Assistant 诊断");
-                    text.AppendLine("时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                    text.AppendLine("版本：" + typeof(DiagnosticsLog).Assembly.GetName().Version);
-                    text.AppendLine("系统：" + Environment.OSVersion + " / " + Environment.UserName);
-                    text.AppendLine("日志条数：" + Buffer.Count);
-                    text.AppendLine();
-                    text.Append(Snapshot());
-                    File.WriteAllText(file, text.ToString(), Encoding.UTF8);
-                    return file;
-                }
-                catch (Exception ex)
-                {
-                    Write("导出诊断失败：" + ex.Message);
-                    return null;
-                }
+                if (!Directory.Exists(Folder)) Directory.CreateDirectory(Folder);
+                var file = Path.Combine(Folder, "diagnostics_" + DateTime.Now.ToString("yyyyMMddHHmmss") + ".txt");
+                var text = new StringBuilder();
+                text.AppendLine("AutoCAD.AI.Assistant 诊断");
+                text.AppendLine("时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                text.AppendLine("版本：" + typeof(DiagnosticsLog).Assembly.GetName().Version);
+                text.AppendLine("系统：" + Environment.OSVersion + " / " + Environment.UserName);
+                text.AppendLine("日志写盘错误：" + Writer.LastError);
+                text.AppendLine();
+                text.Append(Snapshot());
+                File.WriteAllText(file, text.ToString(), Encoding.UTF8);
+                return file;
+            }
+            catch (Exception ex)
+            {
+                Write("导出诊断失败：" + ex.Message);
+                return null;
             }
         }
 

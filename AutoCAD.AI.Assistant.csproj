@@ -81,6 +81,10 @@
     <Compile Include="Services\HatchMaterialPolicy.cs" />
     <Compile Include="Services\HatchBoundaryValidator.cs" />
     <Compile Include="Services\DiagnosticsLog.cs" />
+    <Compile Include="Services\BackgroundWork.cs" />
+    <Compile Include="Services\CadPreviewSettings.cs" />
+    <Compile Include="Services\ChatRetention.cs" />
+    <Compile Include="Views\ChatPreviewImage.cs" />
     <Compile Include="Services\ShortcutCatalog.cs" />
     <Compile Include="Services\CadCommandRecorder.cs" />
     <Compile Include="Views\AiPanel.xaml.cs">

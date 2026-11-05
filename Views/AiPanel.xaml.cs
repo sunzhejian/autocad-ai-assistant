@@ -33,6 +33,7 @@ namespace AutoCAD.AI.Assistant.Views
         private PdfPageSource _pendingPdf;
         private CancellationTokenSource _pdfCancellation;
         private bool _preparingPdf;
+        private bool _shortcutRefreshPending;
 
         public AiPanel()
         {
@@ -43,6 +44,7 @@ namespace AutoCAD.AI.Assistant.Views
             RefreshShortcuts();
             SortByCount.IsChecked = ShortcutCatalog.SortMode != "name";
             SortByName.IsChecked = ShortcutCatalog.SortMode == "name";
+            RecordUsageCheck.IsChecked = ShortcutCatalog.UsageTrackingEnabled;
             _sortReady = true;
             ShortcutCatalog.Changed += OnShortcutsChanged;
 
@@ -60,7 +62,18 @@ namespace AutoCAD.AI.Assistant.Views
         private void OnShortcutsChanged()
         {
             if (!ShortcutPopup.IsOpen) return;
-            Dispatcher.BeginInvoke(new Action(RefreshShortcuts));
+            if (_shortcutRefreshPending) return;
+            _shortcutRefreshPending = true;
+            Dispatcher.BeginInvoke(new Action(delegate
+            {
+                _shortcutRefreshPending = false;
+                if (ShortcutPopup.IsOpen) RefreshShortcuts();
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        private void RecordUsage_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_sortReady) ShortcutCatalog.SetUsageTracking(RecordUsageCheck.IsChecked == true);
         }
 
         private void RefreshShortcuts()
@@ -324,10 +337,7 @@ namespace AutoCAD.AI.Assistant.Views
 
         private void LoadPreview(string path)
         {
-            var preview = new System.Windows.Media.Imaging.BitmapImage();
-            preview.BeginInit(); preview.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
-            preview.CreateOptions = System.Windows.Media.Imaging.BitmapCreateOptions.IgnoreImageCache;
-            preview.UriSource = new Uri(path); preview.EndInit(); preview.Freeze(); PendingImage.Source = preview;
+            PendingImage.Source = ChatPreviewImage.Decode(path, 256);
         }
 
         private void RemovePending_Click(object sender, RoutedEventArgs e)
@@ -347,9 +357,9 @@ namespace AutoCAD.AI.Assistant.Views
             StatusText.Text = "已框选复刻区域，发送后只复刻该区域。";
         }
 
-        private void Diag_Click(object sender, MouseButtonEventArgs e)
+        private async void Diag_Click(object sender, MouseButtonEventArgs e)
         {
-            var path = DiagnosticsLog.Export();
+            var path = await Task.Run(() => DiagnosticsLog.Export());
             if (path == null)
             {
                 StatusText.Text = "诊断导出失败：" + DiagnosticsLog.Folder;
@@ -401,7 +411,7 @@ namespace AutoCAD.AI.Assistant.Views
             var revision = new CadRevisionGuard(targetDocument);
 
             var userItem = new ChatItem { IsUser = true, Content = text, ImagePath = imagePath };
-            _conversation.Add(userItem);
+            ChatRetention.Append(_conversation, userItem, ChatRetention.HistoryLimit);
             AddMessage(userItem);
             InputBox.Clear();
             ClearPendingImage();
@@ -475,7 +485,7 @@ namespace AutoCAD.AI.Assistant.Views
 
                 streaming = false;
                 assistantItem.Content = display;
-                _conversation.Add(new ChatItem { IsUser = false, Role = model.Title, Content = answer });
+                ChatRetention.Append(_conversation, new ChatItem { IsUser = false, Role = model.Title, Content = answer }, ChatRetention.HistoryLimit);
 
                 if (plan == null)
                 {
@@ -486,7 +496,7 @@ namespace AutoCAD.AI.Assistant.Views
                     StatusText.Text = "正在绘制…";
                     try
                     {
-                        DiagnosticsLog.SavePlan(plan);
+                        await Task.Run(() => DiagnosticsLog.SavePlan(plan));
                         DiagnosticsLog.Write("绘图计划：" + CadPlanValidator.Summarize(plan));
                         cancellation.ThrowIfCancellationRequested();
                         if (AcApplication.DocumentManager.MdiActiveDocument != targetDocument)
@@ -540,7 +550,7 @@ namespace AutoCAD.AI.Assistant.Views
 
         private void AddMessage(ChatItem item)
         {
-            _messages.Add(item);
+            ChatRetention.Append(_messages, item, ChatRetention.VisibleLimit);
             EmptyText.Visibility = Visibility.Collapsed;
             MessageScroll.Dispatcher.BeginInvoke(new Action(() => MessageScroll.ScrollToEnd()));
         }

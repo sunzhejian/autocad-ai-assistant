@@ -8,6 +8,7 @@ New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 $plugin = Join-Path $scratch 'AutoCAD.AI.Assistant.dll'
 Copy-Item -LiteralPath (Join-Path $root 'bin\Release\AutoCAD.AI.Assistant.dll') -Destination $plugin
 $env:CADAI_PLUGIN_DLL = $plugin
+$env:CADAI_DATA_DIR = Join-Path $scratch 'plugin-data'
 $env:CADAI_TEST_REPORT = Join-Path $scratch 'report.json'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $testDll = Join-Path $scratch 'CadIntegrationTests.dll'
@@ -25,10 +26,11 @@ $lines = @('FILEDIA', '0', 'CMDECHO', '1', '(setq cadai_trusted (getvar "TRUSTED
 $lines | Set-Content -LiteralPath $script -Encoding ASCII
 $log = Join-Path $output 'console.log'
 & python (Join-Path $PSScriptRoot 'run_console.py') (Join-Path $AutoCADPath 'accoreconsole.exe') $script $log
+if ($LASTEXITCODE -ne 0) { throw "Native console failed; see $log" }
 if (-not (Test-Path -LiteralPath $env:CADAI_TEST_REPORT)) { throw "AutoCAD did not produce a report; see $log" }
 Copy-Item -LiteralPath $env:CADAI_TEST_REPORT -Destination (Join-Path $output 'report.json')
 $report = Get-Content -LiteralPath $env:CADAI_TEST_REPORT -Raw -Encoding UTF8 | ConvertFrom-Json
 $checks = @($report | Where-Object { $null -ne $_.passed })
 $checks | Select-Object test,passed | Format-Table
-if ($checks.Count -ne 21 -or @($checks | Where-Object { -not $_.passed }).Count -gt 0 -or @($report | Where-Object { $_.error }).Count -gt 0) { throw "Native integration failed; see $log" }
+if ($checks.Count -ne 28 -or @($checks | Where-Object { -not $_.passed }).Count -gt 0 -or @($report | Where-Object { $_.error }).Count -gt 0) { throw "Native integration failed; see $log" }
 $report | Where-Object { $null -ne $_.milliseconds } | Format-Table

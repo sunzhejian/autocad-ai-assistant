@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="clr-namespace:AutoCAD.AI.Assistant.Views"
              mc:Ignorable="d" d:DesignWidth="430" d:DesignHeight="700"
              Background="#F5F6F8">
   <UserControl.Resources>
@@ -93,7 +94,10 @@
               <RowDefinition Height="Auto" />
               <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <TextBlock Text="点击指令后，在绘图区按命令提示继续" FontSize="11" Foreground="#737984" Margin="2,0,0,8" />
+            <StackPanel Margin="2,0,0,8">
+              <TextBlock Text="点击指令后，在绘图区按命令提示继续" FontSize="11" Foreground="#737984" />
+              <CheckBox x:Name="RecordUsageCheck" Content="统计命令使用次数" FontSize="11" Margin="0,6,0,0" Checked="RecordUsage_Changed" Unchecked="RecordUsage_Changed" ToolTip="默认关闭；启用后仅在 AI 面板显示时统计，关闭面板即暂停。" />
+            </StackPanel>
             <Grid Grid.Row="1" Margin="0,0,0,8">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -138,8 +142,8 @@
                 <Border x:Name="MessageBorder" Margin="0,0,0,10" Padding="10" CornerRadius="7" Background="#F0F2F5">
                   <StackPanel>
                     <TextBlock Text="{Binding Header}" FontSize="11" FontWeight="SemiBold" Foreground="#737984" Margin="0,0,0,4" />
-                    <Image Source="{Binding ImagePath}" MaxHeight="220" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,0,0,6" Visibility="{Binding HasImage, Converter={StaticResource BoolToVisible}}" />
-                    <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontSize="13" LineHeight="20" Foreground="#292B30" />
+                    <local:ChatPreviewImage SourcePath="{Binding ImagePath}" MaxHeight="220" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,0,0,6" Visibility="{Binding HasImage, Converter={StaticResource BoolToVisible}}" />
+                    <TextBlock Text="{Binding DisplayContent}" TextWrapping="Wrap" FontSize="13" LineHeight="20" Foreground="#292B30" />
                   </StackPanel>
                 </Border>
                 <DataTemplate.Triggers>

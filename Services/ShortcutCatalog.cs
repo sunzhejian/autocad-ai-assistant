@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
+using System.Threading.Tasks;
 using AutoCAD.AI.Assistant.Models;
 
 namespace AutoCAD.AI.Assistant.Services
@@ -13,9 +14,8 @@ namespace AutoCAD.AI.Assistant.Services
         private const int MaxItems = 45;
         private static readonly object Sync = new object();
         private static readonly JavaScriptSerializer Serializer = new JavaScriptSerializer();
-        private static readonly string FolderPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoCAD.AI.Assistant");
-        private static readonly string FilePath = Path.Combine(FolderPath, "shortcuts.json");
+        private static string FilePath { get { return Path.Combine(DiagnosticsLog.Folder, "shortcuts.json"); } }
+        private static readonly BackgroundWork Writer = new BackgroundWork(2000);
 
         private static readonly HashSet<string> IgnoredCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -54,10 +54,22 @@ namespace AutoCAD.AI.Assistant.Services
 
         private static List<CadShortcut> _items;
         private static string _sortMode = "count";
-        private static long _lastSaveTicks;
-        private static bool _dirty;
+        private static long _revision;
+        private static long _savedRevision;
+        private static bool _recordUsage;
+
+        public static bool UsageTrackingEnabled { get { EnsureLoaded(); lock (Sync) return _recordUsage; } }
+        public static void SetUsageTracking(bool enabled)
+        {
+            EnsureLoaded();
+            lock (Sync) { if (_recordUsage == enabled) return; _recordUsage = enabled; _revision++; }
+            Writer.Request(SaveCurrent);
+            var handler = UsageTrackingChanged; if (handler != null) handler();
+            RaiseChanged();
+        }
 
         public static event Action Changed;
+        public static event Action UsageTrackingChanged;
 
         public static string SortMode
         {
@@ -74,7 +86,7 @@ namespace AutoCAD.AI.Assistant.Services
                 {
                     if (item == null) continue;
                     if (!item.BuiltIn && item.UsageCount < AutoAddThreshold) continue;
-                    copy.Add(item);
+                    copy.Add(Clone(item));
                 }
                 if (_sortMode == "name") copy.Sort(CompareByName);
                 else copy.Sort(CompareByUsage);
@@ -86,8 +98,8 @@ namespace AutoCAD.AI.Assistant.Services
         {
             EnsureLoaded();
             if (mode != "name") mode = "count";
-            _sortMode = mode;
-            Save();
+            lock (Sync) { _sortMode = mode; _revision++; }
+            Writer.Request(SaveCurrent);
             RaiseChanged();
         }
 
@@ -109,6 +121,7 @@ namespace AutoCAD.AI.Assistant.Services
             EnsureLoaded();
             lock (Sync)
             {
+                if (!_recordUsage) return;
                 var item = FindByCommand(key);
                 if (item == null)
                 {
@@ -132,27 +145,18 @@ namespace AutoCAD.AI.Assistant.Services
 
                 item.UsageCount++;
                 item.LastUsedTicks = DateTime.Now.Ticks;
-                _dirty = true;
-                if (DateTime.Now.Ticks - _lastSaveTicks > TimeSpan.TicksPerSecond * 2)
-                {
-                    SaveInternal();
-                    _dirty = false;
-                    _lastSaveTicks = DateTime.Now.Ticks;
-                }
+                _revision++;
             }
+            Writer.Request(SaveCurrent);
             RaiseChanged();
         }
 
         public static void Flush()
         {
-            lock (Sync)
-            {
-                if (!_dirty) return;
-                SaveInternal();
-                _dirty = false;
-                _lastSaveTicks = DateTime.Now.Ticks;
-            }
+            Writer.Request(SaveCurrent);
         }
+        public static Task FlushAsync() { Flush(); return Writer.FlushAsync(); }
+        public static string PersistenceError { get { return Writer.LastError; } }
 
         private static void EnsureLoaded()
         {
@@ -176,6 +180,7 @@ namespace AutoCAD.AI.Assistant.Services
                     var file = Serializer.Deserialize<ShortcutFile>(File.ReadAllText(FilePath));
                     if (file != null)
                     {
+                        _recordUsage = file.recordUsage;
                         stored = file.items;
                         if (!string.IsNullOrEmpty(file.sort)) sort = file.sort;
                     }
@@ -193,7 +198,7 @@ namespace AutoCAD.AI.Assistant.Services
                 {
                     if (item == null || string.IsNullOrEmpty(item.Command)) continue;
                     if (FindByCommandIn(result, item.Command) != null) continue;
-                    result.Add(item);
+                    if (result.Count < MaxItems) result.Add(item);
                 }
             }
             foreach (var item in defaults)
@@ -296,25 +301,32 @@ namespace AutoCAD.AI.Assistant.Services
             return text;
         }
 
-        private static void Save()
+        private static void SaveCurrent()
         {
+            string json; long revision;
             lock (Sync)
             {
-                SaveInternal();
+                if (_items == null || _revision == _savedRevision) return;
+                revision = _revision;
+                var snapshot = new List<CadShortcut>(); foreach (var item in _items) snapshot.Add(Clone(item));
+                json = Serializer.Serialize(new ShortcutFile { sort = _sortMode, items = snapshot, recordUsage = _recordUsage });
             }
-        }
-
-        private static void SaveInternal()
-        {
+            var folder = Path.GetDirectoryName(FilePath);
+            Directory.CreateDirectory(folder);
+            var temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                if (!Directory.Exists(FolderPath)) Directory.CreateDirectory(FolderPath);
-                var file = new ShortcutFile { sort = _sortMode, items = _items };
-                File.WriteAllText(FilePath, Serializer.Serialize(file));
+                File.WriteAllText(temporary, json);
+                if (File.Exists(FilePath)) File.Replace(temporary, FilePath, null); else File.Move(temporary, FilePath);
+                lock (Sync) _savedRevision = revision;
             }
-            catch
-            {
-            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
+
+        private static CadShortcut Clone(CadShortcut item)
+        {
+            return new CadShortcut { Name = item.Name, Description = item.Description, Command = item.Command,
+                UsageCount = item.UsageCount, LastUsedTicks = item.LastUsedTicks, BuiltIn = item.BuiltIn };
         }
 
         private static void RaiseChanged()
@@ -327,6 +339,7 @@ namespace AutoCAD.AI.Assistant.Services
         {
             public string sort { get; set; }
             public List<CadShortcut> items { get; set; }
+            public bool recordUsage { get; set; }
         }
     }
 }

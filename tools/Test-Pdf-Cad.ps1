@@ -11,6 +11,7 @@ if ($LASTEXITCODE -ne 0) { throw 'PDF preparation failed' }
 $plugin = Join-Path $scratch 'AutoCAD.AI.Assistant.dll'
 Copy-Item -LiteralPath (Join-Path $root 'bin\Release\AutoCAD.AI.Assistant.dll') -Destination $plugin
 $env:CADAI_PLUGIN_DLL = $plugin
+$env:CADAI_DATA_DIR = Join-Path $scratch 'plugin-data'
 $env:CADAI_SMALL_PDF = Join-Path $scratch 'small.json'
 $env:CADAI_REAL_PDF = Join-Path $scratch 'real.json'
 $env:CADAI_MIXED_PDF = Join-Path $scratch 'mixed.json'

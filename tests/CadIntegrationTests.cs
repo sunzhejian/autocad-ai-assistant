@@ -56,8 +56,10 @@ public sealed class CadIntegrationTests
     private void VerifyCore()
     {
         var before = Count();
+        AcApplication.SetSystemVariable("LWDISPLAY", 0);
         var cm = "{\"sourceUnit\":\"cm\",\"commands\":[{\"type\":\"standard\"},{\"type\":\"rect\",\"p1\":[0,0],\"p2\":[6000,1200]},{\"type\":\"dimlinear\",\"p1\":[0,0],\"p2\":[6000,0],\"position\":[0,-200],\"value\":600,\"confidence\":\"inferred\"}]}";
         Check(Run(cm) != null && Count() == before + 2, "cm geometry created atomically");
+        Check(Convert.ToInt32(AcApplication.GetSystemVariable("LWDISPLAY")) == 0, "drawing preserves the user's lightweight lineweight display");
         var receipt = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(LastReceipt));
         Check(Convert.ToBoolean(receipt["native_checks_passed"]) && !Convert.ToBoolean(receipt["source_accuracy_verified"])
             && Convert.ToInt32(receipt["dimensions"]) == 1, "receipt records native checks without claiming source accuracy");
@@ -130,6 +132,8 @@ public sealed class CadIntegrationTests
         var nested = "{\"commands\":[{\"type\":\"block\",\"name\":\"receipt_test\",\"commands\":[{\"type\":\"dimaligned\",\"p1\":[0,0],\"p2\":[30,40],\"position\":[-5,10],\"value\":50}]},{\"type\":\"insert\",\"name\":\"receipt_test\",\"position\":[0,0]}]}";
         Check(Run(nested) != null && File.ReadAllText(LastReceipt).Contains("\"command\":\"1.1\""), "nested block receipt preserves command identity");
         VerifyRevisionGuard();
+        VerifyPreviewSettings();
+        VerifyRecorderLifecycle();
         countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");
@@ -137,6 +141,49 @@ public sealed class CadIntegrationTests
         Check(Run("{\"commands\":[" + string.Join(",", commands.ToArray()) + "]}") != null && Count() == countBeforeFailure + 400, "400 command native batch");
         Results.Add(new { test = "400 command execution", milliseconds = timer.ElapsedMilliseconds });
         Save();
+    }
+
+    private static void VerifyPreviewSettings()
+    {
+        var assembly = Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL"));
+        var type = assembly.GetType("AutoCAD.AI.Assistant.Services.CadPreviewSettings", true);
+        var names = new[] { "SELECTIONPREVIEW", "COMMANDPREVIEW", "HPQUICKPREVIEW", "ROLLOVERTIPS" };
+        var saved = new int[names.Length];
+        for (var i = 0; i < names.Length; i++)
+        {
+            AcApplication.SetSystemVariable(names[i], i == 0 ? 3 : 1);
+            saved[i] = Convert.ToInt32(AcApplication.GetSystemVariable(names[i]));
+        }
+        var autosave = Convert.ToInt32(AcApplication.GetSystemVariable("SAVETIME")); var before = Count();
+        type.GetMethod("Apply").Invoke(null, null);
+        var reduced = true; foreach (var name in names) reduced &= Convert.ToInt32(AcApplication.GetSystemVariable(name)) == 0;
+        Check(reduced && Count() == before && Convert.ToInt32(AcApplication.GetSystemVariable("SAVETIME")) == autosave,
+            "preview performance mode changes only whitelisted display options");
+        type.GetMethod("Apply").Invoke(null, null); type.GetMethod("Restore").Invoke(null, null);
+        var restored = true;
+        for (var i = 0; i < names.Length; i++) restored &= Convert.ToInt32(AcApplication.GetSystemVariable(names[i])) == saved[i];
+        Check(restored, "repeated performance mode preserves the original preview backup");
+        var file = Path.Combine(Environment.GetEnvironmentVariable("CADAI_DATA_DIR"), "preview-settings.json");
+        File.WriteAllText(file, "{\"schema\":1,\"active\":true,\"values\":{\"SECURELOAD\":0}}");
+        var rejected = false;
+        try { type.GetMethod("Restore").Invoke(null, null); } catch (TargetInvocationException) { rejected = true; }
+        Check(rejected, "malformed preview backup cannot modify unrelated system variables");
+    }
+
+    private static void VerifyRecorderLifecycle()
+    {
+        var assembly = Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL"));
+        var catalog = assembly.GetType("AutoCAD.AI.Assistant.Services.ShortcutCatalog", true);
+        var recorder = assembly.GetType("AutoCAD.AI.Assistant.Services.CadCommandRecorder", true);
+        catalog.GetMethod("SetUsageTracking").Invoke(null, new object[] { false });
+        recorder.GetMethod("Attach").Invoke(null, null);
+        Check(!Convert.ToBoolean(recorder.GetProperty("IsAttached").GetValue(null, null)), "disabled usage tracking installs no document listener");
+        catalog.GetMethod("SetUsageTracking").Invoke(null, new object[] { true });
+        recorder.GetMethod("Attach").Invoke(null, null); recorder.GetMethod("Attach").Invoke(null, null);
+        Check(Convert.ToBoolean(recorder.GetProperty("IsAttached").GetValue(null, null)), "usage recorder attaches idempotently when explicitly enabled");
+        recorder.GetMethod("Detach").Invoke(null, null); recorder.GetMethod("Detach").Invoke(null, null);
+        Check(!Convert.ToBoolean(recorder.GetProperty("IsAttached").GetValue(null, null)), "usage recorder detaches idempotently");
+        catalog.GetMethod("SetUsageTracking").Invoke(null, new object[] { false });
     }
 
     private static void VerifyRevisionGuard()

@@ -4,13 +4,41 @@ using System.Windows.Forms.Integration;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.Windows;
 using AutoCAD.AI.Assistant.Views;
+using AutoCAD.AI.Assistant.Services;
 
 [assembly: CommandClass(typeof(AutoCAD.AI.Assistant.PluginApplication))]
+[assembly: ExtensionApplication(typeof(AutoCAD.AI.Assistant.PluginApplication))]
 
 namespace AutoCAD.AI.Assistant
 {
-    public sealed class PluginApplication
+    public sealed class PluginApplication : IExtensionApplication
     {
+        public void Initialize() { ShortcutCatalog.UsageTrackingChanged += UpdateRecording; }
+        public void Terminate()
+        {
+            ShortcutCatalog.UsageTrackingChanged -= UpdateRecording;
+            CadCommandRecorder.Detach();
+            try { ShortcutCatalog.FlushAsync().Wait(500); DiagnosticsLog.FlushAsync().Wait(500); } catch { }
+        }
+        private static bool _visible;
+        private static void UpdateRecording()
+        {
+            // The visibility flag also avoids loading palette UI wrappers in the
+            // headless host. No palette API is needed for a counter notification.
+            if (_visible && ShortcutCatalog.UsageTrackingEnabled) CadCommandRecorder.Attach();
+            else CadCommandRecorder.Detach();
+        }
+        [CommandMethod("AIPERF", CommandFlags.Modal)]
+        public void ReducePreviews() { PreviewCommand(false); }
+        [CommandMethod("AIPERFRESTORE", CommandFlags.Modal)]
+        public void RestorePreviews() { PreviewCommand(true); }
+        private static void PreviewCommand(bool restore)
+        {
+            var document = Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.MdiActiveDocument;
+            if (document == null) return;
+            try { document.Editor.WriteMessage("\n" + (restore ? CadPreviewSettings.Restore() : CadPreviewSettings.Apply()) + "\n"); }
+            catch (System.Exception ex) { document.Editor.WriteMessage("\n预览设置未完成：" + ex.Message + "\n"); }
+        }
         [CommandMethod("AIDRAW", CommandFlags.Modal)]
         public void ExecuteDrawingPlan()
         {
@@ -36,8 +64,6 @@ namespace AutoCAD.AI.Assistant
         [CommandMethod("AI", CommandFlags.Session)]
         public void ShowAiPanel()
         {
-            AutoCAD.AI.Assistant.Services.CadCommandRecorder.Attach();
-
             if (_palette == null)
             {
                 _panel = new AiPanel();
@@ -47,15 +73,22 @@ namespace AutoCAD.AI.Assistant
                     Dock = System.Windows.Forms.DockStyle.Fill
                 };
 
-                _palette = new PaletteSet("AI", new Guid("AF50251F-E562-4D21-933C-963738B5C775"))
+                _palette = new PaletteSet("AI " + typeof(PluginApplication).Assembly.GetName().Version.ToString(3), new Guid("AF50251F-E562-4D21-933C-963738B5C775"))
                 {
                     Size = new Size(450, 720),
                     MinimumSize = new Size(360, 480)
                 };
                 _palette.Add("AI", host);
+                _palette.StateChanged += (sender, e) =>
+                {
+                    if (e.NewState == StateEventIndex.Hide) _visible = false;
+                    else if (e.NewState == StateEventIndex.Show) _visible = true;
+                    UpdateRecording();
+                };
             }
 
             _palette.Visible = true;
+            _visible = true; UpdateRecording();
             _palette.Activate(0);
             if (_panel != null)
             {

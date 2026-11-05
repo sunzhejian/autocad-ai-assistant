@@ -13,7 +13,8 @@ isolation_id = "cadai_" + uuid.uuid4().hex
 try:
     result = subprocess.run([executable, "/s", script, "/l", "en-US",
                              "/isolate", isolation_id, str(user_data)], stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, timeout=120)
+                            stderr=subprocess.STDOUT, timeout=120,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     output = result.stdout
     code = result.returncode
 except subprocess.TimeoutExpired as error:
