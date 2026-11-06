@@ -244,6 +244,25 @@ public sealed class CadIntegrationTests
         Check(rejected, "existing object edit across commands invalidates waiting AI result");
     }
 
+    [CommandMethod("AIGUARDPAN")]
+    public void PanOnly()
+    {
+        var editor = AcApplication.DocumentManager.MdiActiveDocument.Editor;
+        using (var view = editor.GetCurrentView())
+        {
+            view.CenterPoint = new Autodesk.AutoCAD.Geometry.Point2d(view.CenterPoint.X + 20, view.CenterPoint.Y + 30);
+            view.Width *= 1.1; view.Height *= 1.1; editor.SetCurrentView(view);
+        }
+    }
+    [CommandMethod("AIGUARDSTABLE")]
+    public void VerifyViewOnly()
+    {
+        var accepted = false;
+        try { WaitingGuard.GetType().GetMethod("Verify").Invoke(WaitingGuard, null); accepted = true; }
+        finally { WaitingGuard.Dispose(); WaitingGuard = null; }
+        Check(accepted, "view-only pan and zoom does not invalidate waiting AI result");
+    }
+
     [CommandMethod("AIEMPTY")]
     public void AssertEmpty() { Check(Count() == 0, "single U removes entire AIPLAN batch"); }
 

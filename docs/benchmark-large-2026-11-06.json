@@ -1,0 +1,76 @@
+{
+  "date": "2026-11-06",
+  "host": "AutoCAD 2024 CoreConsole",
+  "existing_entities": 100000,
+  "observations_are_not_fps_or_statistical_guarantees": true,
+  "baseline": [
+    {
+      "version": "1.2.1.0",
+      "existing_entities": 100000,
+      "context_ms": [
+        63,
+        0,
+        0
+      ],
+      "context": "图形=Drawing1.dwg；单位=毫米；模型空间图元=0；DIMSCALE=1"
+    },
+    {
+      "stage": "visible_new_geometry",
+      "milliseconds": 931,
+      "view_width": 1942224.1765478426,
+      "view_height": 1100112.1
+    },
+    {
+      "stage": "offscreen_new_geometry",
+      "milliseconds": 810,
+      "view_width": 1942224.1765478426,
+      "view_height": 1100112.1,
+      "twist": 0.5235987755982988
+    }
+  ],
+  "current": [
+    {
+      "version": "1.2.2.0",
+      "existing_entities": 100000,
+      "context_ms": [
+        18,
+        0,
+        0
+      ],
+      "context": "图形=Drawing1.dwg；单位=Millimeters；模型空间图元≥513；类型抽样=512（Line 512）；简单图元抽样范围=(1000000,1000000)~(1000255,1000096)；图层抽样=0；当前层=0；DIMSCALE=1"
+    },
+    {
+      "test": "large drawing context explicitly labels its bounded sample",
+      "passed": true
+    },
+    {
+      "test": "busy CAD command skips modeless context scan",
+      "passed": true
+    },
+    {
+      "stage": "visible_new_geometry",
+      "milliseconds": 126,
+      "view_width": 200,
+      "view_height": 113.2837407013815
+    },
+    {
+      "test": "visible new geometry preserves user's view in a 100k drawing",
+      "passed": true
+    },
+    {
+      "stage": "offscreen_new_geometry",
+      "milliseconds": 264,
+      "view_width": 55.46883267186996,
+      "view_height": 31.418584287042176,
+      "twist": 0.5235987755982988
+    },
+    {
+      "test": "offscreen geometry fits its own bounds and preserves rotated view",
+      "passed": true
+    },
+    {
+      "test": "new geometry is centered correctly in display coordinates",
+      "passed": true
+    }
+  ]
+}

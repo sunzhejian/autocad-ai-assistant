@@ -11,7 +11,7 @@ namespace AutoCAD.AI.Assistant.Services
     {
         private sealed class Pending
         {
-            public string Plan;
+            public PreparedCadPlan Prepared;
             public PdfPageSource Pdf;
             public double PaperScale;
             public CadRevisionGuard Guard;
@@ -38,9 +38,11 @@ namespace AutoCAD.AI.Assistant.Services
             };
         }
 
-        public static Task<string> Enqueue(Document document, string plan, CancellationToken cancellation, CadRevisionGuard guard = null)
+        public static Task<string> Enqueue(Document document, PreparedCadPlan prepared, CancellationToken cancellation, CadRevisionGuard guard = null)
         {
-            return Queue(document, new Pending { Plan = plan, Cancellation = cancellation, Guard = guard });
+            cancellation.ThrowIfCancellationRequested();
+            if (guard != null) guard.Verify();
+            return Queue(document, new Pending { Prepared = prepared, Cancellation = cancellation, Guard = guard });
         }
 
         public static Task<string> EnqueuePdf(Document document, PdfPageSource source, double scale, CancellationToken cancellation, CadRevisionGuard guard)
@@ -85,7 +87,7 @@ namespace AutoCAD.AI.Assistant.Services
                 if (job.Guard != null) job.Guard.Verify();
                 string message;
                 if (job.Pdf != null) message = PdfDrawingImporter.Execute(document, job.Pdf, job.PaperScale);
-                else if (new CadDrawingExecutor().Execute(job.Plan, out message) == null)
+                else if (new CadDrawingExecutor().ExecutePrepared(job.Prepared, out message) == null)
                     throw new InvalidOperationException(message);
                 job.Completion.TrySetResult(message);
             }

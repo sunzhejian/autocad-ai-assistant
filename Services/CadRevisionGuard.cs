@@ -26,7 +26,11 @@ namespace AutoCAD.AI.Assistant.Services
             _database.ObjectErased += Erased;
             Autodesk.AutoCAD.ApplicationServices.Application.DocumentManager.DocumentToBeDestroyed += Closing;
         }
-        private void Changed(object sender, ObjectEventArgs e) { _changed = true; }
+        private void Changed(object sender, ObjectEventArgs e)
+        {
+            if (e.DBObject is ViewportTableRecord || e.DBObject is ViewTableRecord || e.DBObject is Viewport) return;
+            _changed = true;
+        }
         private void Erased(object sender, ObjectErasedEventArgs e) { _changed = true; }
         private void Closing(object sender, DocumentCollectionEventArgs e) { if (e.Document == _document) _closed = true; }
         public void Verify()

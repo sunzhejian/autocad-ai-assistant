@@ -50,6 +50,7 @@ namespace AutoCAD.AI.Assistant.Services
                 var created = new List<ObjectId>();
                 foreach (var id in ModelEntities(database)) if (!before.Contains(id)) created.Add(id);
                 var records = new List<object>(); var visible = 0; var entities = 0; var hatches = 0;
+                Extents3d? importedBounds = null;
                 using (var tr = database.TransactionManager.StartTransaction())
                 {
                     var pending = new Queue<ObjectId>(created);
@@ -62,7 +63,8 @@ namespace AutoCAD.AI.Assistant.Services
                         if (entity == null) continue;
                         var owner = tr.GetObject(entity.OwnerId, OpenMode.ForRead) as BlockTableRecord;
                         if (owner == null || owner.IsAnonymous) continue;
-                        if (String.Equals(owner.Name, BlockTableRecord.ModelSpace, StringComparison.OrdinalIgnoreCase)) visible++;
+                        if (String.Equals(owner.Name, BlockTableRecord.ModelSpace, StringComparison.OrdinalIgnoreCase))
+                        { visible++; importedBounds = entity.GeometricExtents; }
                         entities++; if (entity is Hatch) hatches++;
                         records.Add(new { handle = entity.Handle.ToString(), type = entity.GetType().Name, space = owner.Name, layer = entity.Layer });
                         var reference = entity as BlockReference;
@@ -76,7 +78,7 @@ namespace AutoCAD.AI.Assistant.Services
                     tr.Commit();
                 }
                 if (database.Insunits == UnitsValue.Undefined) database.Insunits = UnitsValue.Millimeters;
-                try { document.Editor.Regen(); CadDrawingExecutor.ZoomToExtents(document); } catch { }
+                try { CadViewRefresh.Refresh(document, importedBounds, false); } catch { }
                 var receiptPath = Path.Combine(DiagnosticsLog.Folder, "receipts", "pdf_" + Guid.NewGuid().ToString("N") + ".json");
                 try
                 {

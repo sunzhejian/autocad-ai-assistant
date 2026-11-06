@@ -68,6 +68,9 @@
     <Compile Include="Services\OpenAiCompatibleClient.cs" />
     <Compile Include="Services\ImagePreprocessor.cs" />
     <Compile Include="Services\CadDrawingExecutor.cs" />
+    <Compile Include="Services\CadDrawingContext.cs" />
+    <Compile Include="Services\PreparedCadPlan.cs" />
+    <Compile Include="Services\CadViewRefresh.cs" />
     <Compile Include="Services\CadExecutionReceipt.cs" />
     <Compile Include="Services\CadRevisionGuard.cs" />
     <Compile Include="Services\PdfSourceService.cs" />

@@ -19,6 +19,7 @@ namespace AutoCAD.AI.Assistant.Services
         public int Dimensions { get; private set; }
         public int Hatches { get; private set; }
         public int ObjectCount { get { return _records.Count; } }
+        public Extents3d? ModelBounds { get; private set; }
         public CadExecutionReceipt(Database database) { _database = database; _previous = _active; _active = this; }
         public void Begin(string path, Dictionary<string, object> command) { _current = path; _commands[path] = command; }
         internal static void Record(Entity entity)
@@ -80,6 +81,16 @@ namespace AutoCAD.AI.Assistant.Services
                         Hatches++; checkedPaths.Add(pair.Value);
                     }
                     _records.Add(record);
+                    if (String.Equals(owner.Name, BlockTableRecord.ModelSpace, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            var box = entity.GeometricExtents;
+                            if (ModelBounds.HasValue) { var combined = ModelBounds.Value; combined.AddExtents(box); ModelBounds = combined; }
+                            else ModelBounds = box;
+                        }
+                        catch { }
+                    }
                 }
                 catch (Exception ex) { throw new InvalidOperationException("原生校核第 " + pair.Value + " 条（" + entity.GetType().Name + "）：" + ex.Message, ex); }
             }

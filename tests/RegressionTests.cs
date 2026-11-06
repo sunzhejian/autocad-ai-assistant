@@ -40,6 +40,7 @@ internal static class RegressionTests
             TestChatRetention();
             TestBufferedLogs();
             TestValidation();
+            TestPreparedPlan();
             TestMaterials();
             TestHatchBoundaries();
             foreach (var fixture in Directory.GetFiles("tests/fixtures", "*.json"))
@@ -60,6 +61,18 @@ internal static class RegressionTests
             ShortcutCatalog.FlushAsync().Wait(5000); DiagnosticsLog.FlushAsync().Wait(5000);
             Directory.Delete(folder, true);
         }
+    }
+
+    private static void TestPreparedPlan()
+    {
+        var source = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[{\"type\":\"circle\",\"center\":[2,3],\"radius\":5}]}";
+        var prepared = Task.Run(() => PreparedCadPlan.Create(source)).GetAwaiter().GetResult();
+        var root = prepared.Claim(); var command = (Dictionary<string, object>)((object[])root["commands"])[0];
+        Check(CadPlanQuality.Number(command["radius"]) == 50 && source.Contains("\"radius\":5"), "background preflight converts source units while preserving source JSON");
+        try { prepared.Claim(); Check(false, "prepared plan cannot execute twice"); }
+        catch (InvalidOperationException) { Check(true, "prepared plan cannot execute twice"); }
+        try { PreparedCadPlan.Create(source.Replace("\"radius\":5", "\"radius\":-5")); Check(false, "invalid background plan is rejected before queueing"); }
+        catch (InvalidOperationException) { Check(true, "invalid background plan is rejected before queueing"); }
     }
 
     private static void TestBackgroundWork()

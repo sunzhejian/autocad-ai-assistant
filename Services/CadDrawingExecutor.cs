@@ -19,20 +19,6 @@ namespace AutoCAD.AI.Assistant.Services
             space.AppendEntity(entity);
             CadExecutionReceipt.Record(entity);
         }
-        internal static void ZoomToExtents(Document document)
-        {
-            var database = document.Database;
-            database.UpdateExt(true);
-            using (var view = document.Editor.GetCurrentView())
-            {
-                var min = database.Extmin; var max = database.Extmax;
-                var aspect = view.Width / Math.Max(view.Height, 1e-9);
-                view.Height = Math.Max(max.Y - min.Y, (max.X - min.X) / aspect) * 1.1 + 1;
-                view.Width = view.Height * aspect;
-                view.CenterPoint = new Point2d((min.X + max.X) / 2, (min.Y + max.Y) / 2);
-                document.Editor.SetCurrentView(view);
-            }
-        }
         public static string ExtractPlan(string answer)
         {
             return CadPlanText.Extract(answer);
@@ -45,155 +31,21 @@ namespace AutoCAD.AI.Assistant.Services
 
         public static string BuildContext()
         {
-            Document document = AcApplication.DocumentManager.MdiActiveDocument;
-            if (document == null) return "当前没有活动图形。";
-            var database = document.Database;
-            var text = new StringBuilder();
-
-            var summary = new Dictionary<string, int>();
-            var total = 0;
-            var minX = 0.0;
-            var minY = 0.0;
-            var maxX = 0.0;
-            var maxY = 0.0;
-            var hasBox = false;
-            try
-            {
-                var table = (BlockTable)database.BlockTableId.GetObject(OpenMode.ForRead);
-                var space = (BlockTableRecord)table[BlockTableRecord.ModelSpace].GetObject(OpenMode.ForRead);
-                foreach (ObjectId id in space)
-                {
-                    total++;
-                    if (total > 20000) break;
-                    if (total > 400) continue;
-                    try
-                    {
-                        var entity = (Entity)id.GetObject(OpenMode.ForRead);
-                        var name = entity.GetType().Name;
-                        summary[name] = summary.ContainsKey(name) ? summary[name] + 1 : 1;
-                        var box = entity.GeometricExtents;
-                        if (!hasBox)
-                        {
-                            minX = box.MinPoint.X; minY = box.MinPoint.Y;
-                            maxX = box.MaxPoint.X; maxY = box.MaxPoint.Y;
-                            hasBox = true;
-                        }
-                        else
-                        {
-                            if (box.MinPoint.X < minX) minX = box.MinPoint.X;
-                            if (box.MinPoint.Y < minY) minY = box.MinPoint.Y;
-                            if (box.MaxPoint.X > maxX) maxX = box.MaxPoint.X;
-                            if (box.MaxPoint.Y > maxY) maxY = box.MaxPoint.Y;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            text.Append("图形=" + document.Name + "；单位=" + UnitName(database) + "；模型空间图元=" + total);
-            if (summary.Count > 0)
-            {
-                var parts = new List<string>();
-                foreach (var pair in summary)
-                {
-                    if (parts.Count >= 10) break;
-                    parts.Add(pair.Key + " " + pair.Value);
-                }
-                text.Append("（" + string.Join("、", parts.ToArray()) + "）");
-            }
-
-            if (hasBox)
-            {
-                text.Append("；范围=(" + Round(minX) + "," + Round(minY) + ")~(" + Round(maxX) + "," + Round(maxY) + ")");
-            }
-
-            try
-            {
-                var layerTable = (LayerTable)database.LayerTableId.GetObject(OpenMode.ForRead);
-                var layers = new List<string>();
-                foreach (ObjectId id in layerTable)
-                {
-                    if (layers.Count >= 20) break;
-                    var record = (LayerTableRecord)id.GetObject(OpenMode.ForRead);
-                    layers.Add(record.Name);
-                }
-                text.Append("；图层=" + (layers.Count == 0 ? "无" : string.Join(",", layers.ToArray())));
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                var current = (LayerTableRecord)database.Clayer.GetObject(OpenMode.ForRead);
-                text.Append("；当前层=" + current.Name);
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                text.Append("；DIMSCALE=" + Round(database.Dimscale));
-            }
-            catch
-            {
-            }
-
-            return text.ToString();
-        }
-
-        private static string UnitName(Database database)
-        {
-            try
-            {
-                switch (database.Insunits)
-                {
-                    case UnitsValue.Millimeters: return "毫米";
-                    case UnitsValue.Centimeters: return "厘米";
-                    case UnitsValue.Meters: return "米";
-                    case UnitsValue.Inches: return "英寸";
-                    case UnitsValue.Feet: return "英尺";
-                    default: return database.Insunits.ToString();
-                }
-            }
-            catch
-            {
-                return "未知";
-            }
-        }
-
-        private static string Round(double value)
-        {
-            return Math.Round(value, 2).ToString("0.##", CultureInfo.InvariantCulture);
+            return CadDrawingContext.Read(AcApplication.DocumentManager.MdiActiveDocument);
         }
 
         public string Execute(string json, out string message)
         {
-            LastReceiptPath = null;
-            var validation = CadPlanValidator.Validate(json);
-            if (validation != null) { message = "计划校验失败：" + validation; return null; }
-            json = CadPlanNormalizer.Normalize(json);
-            validation = CadPlanValidator.Validate(json);
-            if (validation != null) { message = "单位换算后校验失败：" + validation; return null; }
-            var timer = System.Diagnostics.Stopwatch.StartNew();
-            var serializer = new JavaScriptSerializer { MaxJsonLength = 8 * 1024 * 1024 };
-            Dictionary<string, object> root;
-            try
-            {
-                root = serializer.DeserializeObject(json) as Dictionary<string, object>;
-            }
-            catch (Exception ex)
-            {
-                message = "绘图指令不是合法 JSON：" + ex.Message;
-                return null;
-            }
+            try { return ExecutePrepared(PreparedCadPlan.Create(json), out message); }
+            catch (Exception ex) { LastReceiptPath = null; message = ex.Message; return null; }
+        }
 
+        internal string ExecutePrepared(PreparedCadPlan prepared, out string message)
+        {
+            LastReceiptPath = null;
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            var json = prepared.Json;
+            var root = prepared.Claim();
             var commands = root == null ? null : root.ContainsKey("commands") ? root["commands"] as object[] : null;
             if (commands == null || commands.Length == 0)
             {
@@ -214,6 +66,7 @@ namespace AutoCAD.AI.Assistant.Services
             var layers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Database database = document.Database;
             var previousUnits = database.Insunits;
+            Extents3d? newBounds = null;
             var previousVariables = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             foreach (var variable in CadPlanValidator.DrawingVariables)
             {
@@ -238,6 +91,7 @@ namespace AutoCAD.AI.Assistant.Services
                         database.Insunits = UnitsValue.Millimeters;
                         receipt.Inspect(transaction);
                         created = receipt.ObjectCount;
+                        newBounds = receipt.ModelBounds;
                         transaction.Commit();
                     }
                     catch (Exception ex)
@@ -255,13 +109,17 @@ namespace AutoCAD.AI.Assistant.Services
                 DiagnosticsLog.Write("原生校核 标注=" + receipt.Dimensions + " 填充=" + receipt.Hatches + " 回执=" + LastReceiptPath);
             }
 
-            if (created > 0)
+            if (created > 0 || applied > 0)
             {
                 try
                 {
-                    document.Editor.Regen();
-                    // Zoom through the view API: a queued ZOOM command would consume the next undo step.
-                    ZoomToExtents(document);
+                    var regenerate = false;
+                    foreach (var pair in previousVariables)
+                    {
+                        try { if (!Object.Equals(pair.Value, AcApplication.GetSystemVariable(pair.Key))) { regenerate = true; break; } } catch { }
+                    }
+                    var fitted = CadViewRefresh.Refresh(document, newBounds, regenerate);
+                    DiagnosticsLog.Write("绘图刷新 重生成=" + regenerate + " 调整新增范围=" + fitted);
                 }
                 catch
                 {

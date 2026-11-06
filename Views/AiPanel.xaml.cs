@@ -440,7 +440,7 @@ namespace AutoCAD.AI.Assistant.Views
                 var context = string.Empty;
                 try
                 {
-                    context = CadDrawingExecutor.BuildContext();
+                    if (imagePath == null) context = CadDrawingExecutor.BuildContext();
                 }
                 catch
                 {
@@ -462,7 +462,7 @@ namespace AutoCAD.AI.Assistant.Views
                 if (imagePath != null)
                 {
                     cacheKey = await Task.Run(() => DrawingPlanCache.Key(imagePath, text, model, detailedImages), cancellation);
-                    if (reuseCachedPlan) cachedPlan = cache.TryRead(cacheKey);
+                    if (reuseCachedPlan) cachedPlan = await Task.Run(() => cache.TryRead(cacheKey), cancellation);
                 }
                 var answer = cachedPlan == null ? await _client.CompleteAsync(model, history, context, imagePath, onDelta, cancellation,
                     status => Dispatcher.BeginInvoke(new Action(() => StatusText.Text = status)), detailedImages)
@@ -475,7 +475,7 @@ namespace AutoCAD.AI.Assistant.Views
                 string validationError = null;
                 if (plan != null)
                 {
-                    validationError = CadPlanValidator.Validate(plan);
+                    validationError = await Task.Run(() => CadPlanValidator.Validate(plan), cancellation);
                     if (validationError != null)
                     {
                         plan = null;
@@ -493,7 +493,7 @@ namespace AutoCAD.AI.Assistant.Views
                 }
                 else
                 {
-                    StatusText.Text = "正在绘制…";
+                    StatusText.Text = "正在预检并绘制…";
                     try
                     {
                         await Task.Run(() => DiagnosticsLog.SavePlan(plan));
@@ -501,8 +501,9 @@ namespace AutoCAD.AI.Assistant.Views
                         cancellation.ThrowIfCancellationRequested();
                         if (AcApplication.DocumentManager.MdiActiveDocument != targetDocument)
                             throw new InvalidOperationException("活动图形已切换。计划已保存在本地，可切回原图后用 AIPLAN 执行。");
+                        var prepared = await Task.Run(() => PreparedCadPlan.Create(plan), cancellation);
                         revision.Verify();
-                        var message = await CadExecutionQueue.Enqueue(targetDocument, plan, cancellation, revision);
+                        var message = await CadExecutionQueue.Enqueue(targetDocument, prepared, cancellation, revision);
                         if (imagePath != null) await Task.Run(() => cache.SaveExecuted(cacheKey, plan));
                         if (imagePath != null) message += " " + CadPlanQuality.Describe(plan);
                         DiagnosticsLog.Write("绘图完成：" + message);
