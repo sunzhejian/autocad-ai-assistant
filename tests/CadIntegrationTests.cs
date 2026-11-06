@@ -55,6 +55,11 @@ public sealed class CadIntegrationTests
     }
     private void VerifyCore()
     {
+        var startup = Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL"))
+            .GetType("AutoCAD.AI.Assistant.Services.CadStartupUi", true);
+        Check(!(bool)startup.GetProperty("IsDesktopHost", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null, null)
+            && !(bool)startup.GetField("_pending", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null),
+            "headless host skips startup UI and does not retain an idle subscription");
         var before = Count();
         AcApplication.SetSystemVariable("LWDISPLAY", 0);
         var cm = "{\"sourceUnit\":\"cm\",\"commands\":[{\"type\":\"standard\"},{\"type\":\"rect\",\"p1\":[0,0],\"p2\":[6000,1200]},{\"type\":\"dimlinear\",\"p1\":[0,0],\"p2\":[6000,0],\"position\":[0,-200],\"value\":600,\"confidence\":\"inferred\"}]}";

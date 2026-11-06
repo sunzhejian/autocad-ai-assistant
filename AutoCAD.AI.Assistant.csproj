@@ -31,6 +31,10 @@
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="AdWindows">
+      <HintPath>$(AutoCAD2024Path)\AdWindows.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="acmgd">
       <HintPath>$(AutoCAD2024Path)\acmgd.dll</HintPath>
       <Private>False</Private>
@@ -86,6 +90,8 @@
     <Compile Include="Services\DiagnosticsLog.cs" />
     <Compile Include="Services\BackgroundWork.cs" />
     <Compile Include="Services\CadPreviewSettings.cs" />
+    <Compile Include="Services\CadStartupUi.cs" />
+    <Compile Include="Views\CadRibbon.cs" />
     <Compile Include="Services\ChatRetention.cs" />
     <Compile Include="Views\ChatPreviewImage.cs" />
     <Compile Include="Services\ShortcutCatalog.cs" />

@@ -13,14 +13,23 @@ namespace AutoCAD.AI.Assistant
 {
     public sealed class PluginApplication : IExtensionApplication
     {
-        public void Initialize() { ShortcutCatalog.UsageTrackingChanged += UpdateRecording; }
+        public void Initialize()
+        {
+            ShortcutCatalog.UsageTrackingChanged += UpdateRecording;
+            CadStartupUi.Initialize();
+        }
         public void Terminate()
         {
             ShortcutCatalog.UsageTrackingChanged -= UpdateRecording;
+            CadStartupUi.Terminate();
             CadCommandRecorder.Detach();
             try { ShortcutCatalog.FlushAsync().Wait(500); DiagnosticsLog.FlushAsync().Wait(500); } catch { }
         }
         private static bool _visible;
+        [CommandMethod("AIUI", CommandFlags.Session)]
+        public void RestoreInterface() { CadStartupUi.Apply(); }
+        [CommandMethod("AIUIOFF", CommandFlags.Session)]
+        public void DisableStartupInterface() { CadStartupUi.Disable(); }
         private static void UpdateRecording()
         {
             // The visibility flag also avoids loading palette UI wrappers in the
