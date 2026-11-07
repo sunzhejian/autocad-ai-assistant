@@ -1,10 +1,32 @@
 # AutoCAD AI 助手
 
-AutoCAD 2024 插件，提供启动绘图工具栏和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前版本 **1.3.0**，.NET Framework 4.8 / Windows x64。
+[![回归测试](https://github.com/sunzhejian/autocad-ai-assistant/actions/workflows/regression.yml/badge.svg)](https://github.com/sunzhejian/autocad-ai-assistant/actions/workflows/regression.yml)
+[![最新版本](https://img.shields.io/github/v/release/sunzhejian/autocad-ai-assistant)](https://github.com/sunzhejian/autocad-ai-assistant/releases/latest)
+![AutoCAD 2024](https://img.shields.io/badge/AutoCAD-2024-red)
+![Windows x64](https://img.shields.io/badge/Windows-x64-blue)
+
+AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前版本 **1.3.1**，.NET Framework 4.8 / Windows x64。
+
+**AutoCAD 2024 assistant for Windows:** native drawing tools, local vector PDF import, image-to-CAD plans, unit and hatch validation, atomic undo, and OpenAI-compatible model configuration. AI reconstruction still needs human review.
+
+## 快速安装
+
+从 [Releases](https://github.com/sunzhejian/autocad-ai-assistant/releases/latest) 下载 Windows 安装包及 SHA256 校验文件，解压后双击 `Install.cmd`；保存图纸并重启 AutoCAD 2024，即可看到完整工具区和“AI 制图”选项卡。二进制安装不需要编译工具；PDF 功能另需本地 Python/PyMuPDF。
+
+[安装与故障排查](docs/INSTALL.md) · [参与开发与构建](CONTRIBUTING.md) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/sunzhejian/autocad-ai-assistant/issues/new/choose)
+
+| 场景 | 工作方式 |
+| --- | --- |
+| 文字或截图绘图 | 配置自己的兼容服务，生成并校验结构化计划 |
+| 矢量 PDF 赛题 | 本地逐页处理，原生导入，无需模型请求 |
+| 扫描 PDF / 局部细节 | 页预览或框选后由视觉模型重建 |
+| 日常制图 | 27 个常用入口、完整原生功能区和可恢复的预览设置 |
+
+v1.3.1 增加配置原子保存与备份恢复、启动偏好恢复命令、安装包完整性检查及公开提交检查。模型配置、密钥、赛题原文件和运行产物保留在本地，不随安装包分发。图片或文字发送到所配置的模型服务前，请确认输入适合交给该服务。
 
 ## 使用
 
-1. 编译 Release x64，运行 `Install.ps1`，重启 AutoCAD，输入 `AI`。
+1. 安装发布包，或编译 Release x64 后运行 `Install.ps1`；重启 AutoCAD，输入 `AI`。
 2. 配置支持视觉输入的模型；密钥使用当前 Windows 用户的 DPAPI 加密保存在本地。
 3. 点击“图/PDF”选择文件，或用 Ctrl+V 粘贴图片/PDF 文件。图片默认发送一张最长边 1600px 的增强图；单视图优先“框选”，并在输入中保留源图单位说明。
 4. 复杂大图可勾选“精细分块”，同时发送整图和四张重叠高清图，模型处理时间可能增加。
@@ -31,11 +53,13 @@ PDF 处理在本地独立 Python 进程中完成，依赖另行安装的 `PyMuPD
 
 ### 恢复 CAD 界面
 
-v1.3.0 启动时显示完整功能区、菜单栏、命令行、文件选项卡、状态栏和文件对话框，并添加“AI 制图”选项卡：AI 助手/图纸复刻、本地计划、直线/多段线/矩形/圆、填充/编辑填充、移动/复制/偏移/修剪/圆角/镜像、尺寸标注/图层/特性/快速选择、全图/平移和预览性能开关。按钮调用现有原生工具，AI 模型只在发送任务时调用。
+启动时显示完整功能区、菜单栏、命令行、文件选项卡、状态栏和文件对话框，并添加“AI 制图”选项卡：AI 助手/图纸复刻、本地计划、直线/多段线/矩形/圆、填充/编辑填充、移动/复制/偏移/修剪/圆角/镜像、尺寸标注/图层/特性/快速选择、全图/平移和预览性能开关。按钮调用现有原生工具，AI 模型只在发送任务时调用。
 
 启动发现没有图形时，使用本机 `acadiso.dwt` 创建毫米制空白图；已有图形保留原单位。设置 `STARTUP=0`、`STARTMODE=0` 避免再次进入无图形的灰色界面。首次修改前将六项应用设置备份到本地 `startup-ui-original.json`。`AIUI` 可重新整理界面；`AIUIOFF` 关闭下次启动整理，保留当前界面与已设置的应用偏好。无图形、缺少毫米模板时不擅自使用英制模板。
 
 启动操作通过一次空闲回调排队，完成或失败后解绑，等待忙碌命令最多 20 次回调；不在鼠标移动、选择或缩放时轮询。CoreConsole 跳过全部启动界面代码。AI 面板、模型设置和聊天图片仍按需初始化。
+
+`AIUIRESTORE` 恢复首次备份的六项原始启动偏好并关闭启动整理；当前图纸和功能区保留。备份读取完整校验变量名、整数类型及范围，损坏或额外变量会阻止修改。应用设置失败时尝试还原执行前的值。
 
 功能区被手动折叠时也可双击当前选项卡，或点击选项卡右侧的最小化按钮；`Ctrl+9` 显示/隐藏命令行。切换工作空间后自定义选项卡若被重建，可输入 `AIUI` 恢复。
 
@@ -47,7 +71,7 @@ v1.2.1 默认关闭命令频次统计；可在“指令集”勾选“统计命�
 
 聊天保留最近 40 条可见消息和 12 条完整上下文消息（实际模型请求仍选最近 8 条）；长消息只展示前 8000 字符。聊天图片在后台解码，最长边 480 像素、最多同时解码 2 张；附件预览最长边 256 像素，模型仍使用原图处理流程。
 
-鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板标题应显示 **AI 1.3.0**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
+鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板名称应显示 **AI 1.3.1**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
 
 v1.2.2 图片复刻跳过旧图上下文；文字请求最多抽样 512 个图元、读取 128 个简单范围，以 25ms 为扫描目标（单次原生调用不可中断）。返回的类型与范围明确标为抽样，CAD 命令执行中则跳过扫描。面板的缓存读取与计划预检在后台运行，执行前再次核对图形状态。
 
@@ -65,7 +89,7 @@ v1.2.2 图片复刻跳过旧图上下文；文字请求最多抽样 512 个图�
 
 ## 编译与验证
 
-依赖 AutoCAD 2024 安装目录中的 `acmgd.dll`、`acdbmgd.dll`、`accoremgd.dll`，以及 .NET Framework 4.8 开发工具。默认目录 `D:\AutoCAD 2024`，可通过 MSBuild 的 `AutoCAD2024Path` 属性修改。
+依赖 AutoCAD 2024 安装目录中的 `acmgd.dll`、`acdbmgd.dll`、`accoremgd.dll`、`AdWindows.dll`，以及 .NET Framework 4.8 开发工具。默认目录 `D:\AutoCAD 2024`，可通过 MSBuild 的 `AutoCAD2024Path` 属性修改。详细命令见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\Test.ps1
@@ -76,7 +100,7 @@ powershell -File tools\Test-Pdf-Cad.ps1 -SourcePdf '赛题.pdf' -Page 3 -PlotPdf
 .\Install.ps1
 ```
 
-纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。2026-11-05 已在本机 2024 控制台确认隔离日志，13 项原生检查通过。
+纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。v1.3.1 当前为 98 项纯回归和 30 项原生集成检查；GitHub CI 另执行 PDF worker 测试和提交文件检查，不声称在云端完成有许可的原生 CAD 验证。
 
 ## 本地题库复刻
 

@@ -8,6 +8,7 @@ try {
     $sources = @('tests\RegressionTests.cs', 'Models\ChatItem.cs', 'Models\ModelConfiguration.cs', 'Models\CadShortcut.cs',
         'Services\BackgroundWork.cs', 'Services\ChatRetention.cs', 'Services\ShortcutCatalog.cs',
         'Services\PreparedCadPlan.cs',
+        'Services\AtomicFile.cs', 'Services\ModelSettingsStore.cs', 'Services\StartupSettingsBackup.cs',
         'Services\CadPlanText.cs', 'Services\CadPlanQuality.cs', 'Services\CadPlanValidator.cs', 'Services\CadPlanNormalizer.cs', 'Services\HatchMaterialPolicy.cs', 'Services\HatchBoundaryValidator.cs',
         'Services\ImagePreprocessor.cs', 'Services\OpenAiCompatibleClient.cs', 'Services\SecretProtector.cs', 'Services\DiagnosticsLog.cs', 'Services\DrawingPlanCache.cs', 'Services\PdfSourceService.cs')
     & (Join-Path $framework 'csc.exe') /nologo /r:System.Web.Extensions.dll /r:System.Net.Http.dll /r:System.Drawing.dll /r:System.Security.dll /out:artifacts\RegressionTests.exe $sources

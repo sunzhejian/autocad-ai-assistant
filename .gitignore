@@ -10,3 +10,10 @@ startup-backup/
 *.log
 **/__pycache__/
 models.json
+models.json.*
+.env
+.env.*
+*.pfx
+*.p12
+*.key
+releases/

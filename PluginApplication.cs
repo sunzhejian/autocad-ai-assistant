@@ -30,6 +30,8 @@ namespace AutoCAD.AI.Assistant
         public void RestoreInterface() { CadStartupUi.Apply(); }
         [CommandMethod("AIUIOFF", CommandFlags.Session)]
         public void DisableStartupInterface() { CadStartupUi.Disable(); }
+        [CommandMethod("AIUIRESTORE", CommandFlags.Session)]
+        public void RestoreStartupPreferences() { CadStartupUi.Restore(); }
         private static void UpdateRecording()
         {
             // The visibility flag also avoids loading palette UI wrappers in the

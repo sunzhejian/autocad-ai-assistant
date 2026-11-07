@@ -2,19 +2,29 @@ name: Drawing workflow regression
 on:
   push:
   pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   pure-regression:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - name: Check tracked files for private configuration and known credential patterns
+        shell: powershell
+        run: python tools/audit_public.py
       - name: Validate plans, source units, image preparation, cache and HTTP behavior
         shell: powershell
         run: ./tools/Test.ps1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-pdf.txt
       - name: Validate PDF routing, rotation, snapshots and page limits
         shell: powershell
         run: |
-          python -m pip install PyMuPDF==1.27.2
+          python -m pip install -r requirements-pdf.txt
           python -m unittest discover -s tests -p test_pdf_worker.py -v

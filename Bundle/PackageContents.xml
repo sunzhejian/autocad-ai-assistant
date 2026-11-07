@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ApplicationPackage SchemaVersion="1.0"
-                    AppVersion="1.3.0"
+                    AppVersion="1.3.1"
                     ProductCode="{6EACF5AB-67D7-4C08-9697-1FAD507F20B8}"
                     UpgradeCode="{702EE4A7-7764-4F4A-B1D1-34C10855F475}"
                     Name="AutoCAD AI Assistant"
@@ -17,6 +17,7 @@
         <Command Global="AI" Local="AI" Description="打开 AI 助手面板" />
         <Command Global="AIUI" Local="AIUI" Description="恢复完整界面并启用启动工具" />
         <Command Global="AIUIOFF" Local="AIUIOFF" Description="关闭启动界面整理" />
+        <Command Global="AIUIRESTORE" Local="AIUIRESTORE" Description="恢复六项原始启动偏好" />
         <Command Global="AIDRAW" Local="AIDRAW" Description="执行 AI 绘图队列" />
         <Command Global="AIPLAN" Local="AIPLAN" Description="执行本地 JSON 绘图计划" />
         <Command Global="AIPERF" Local="AIPERF" Description="减少 CAD 实时预览负担" />

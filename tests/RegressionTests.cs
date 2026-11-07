@@ -38,6 +38,7 @@ internal static class RegressionTests
             TestBackgroundWork();
             TestShortcutPersistence();
             TestChatRetention();
+            TestSettingsRecovery(folder);
             TestBufferedLogs();
             TestValidation();
             TestPreparedPlan();
@@ -61,6 +62,48 @@ internal static class RegressionTests
             ShortcutCatalog.FlushAsync().Wait(5000); DiagnosticsLog.FlushAsync().Wait(5000);
             Directory.Delete(folder, true);
         }
+    }
+
+    private static void TestSettingsRecovery(string folder)
+    {
+        var path = Path.Combine(folder, "models.json");
+        var store = new ModelSettingsStore(path);
+        var model = new ModelConfiguration { ModelId = "local-model", RequestUrl = "http://localhost:1234/v1", ApiKeyProtected = SecretProtector.Protect("test-local-secret") };
+        store.Save(new[] { model });
+        Check(SecretProtector.Unprotect(store.Load()[0].ApiKeyProtected) == "test-local-secret", "atomic model save preserves DPAPI encrypted credentials");
+        model.DisplayName = "renamed"; store.Save(new[] { model });
+        File.WriteAllText(path, "{truncated");
+        Check(store.Load()[0].DisplayName == null && store.LastWarning != null, "damaged model primary recovers the last valid backup visibly");
+        store.Save(new[] { model });
+        Check(Directory.GetFiles(folder, "models.json.corrupt-*").Length == 1 && File.ReadAllText(path + ".bak").Contains("local-model"), "recovery save preserves the damaged primary and healthy backup");
+        var unchanged = File.ReadAllText(path);
+        using (var held = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            try { store.Save(new[] { model }); Check(false, "locked model save fails without truncation"); }
+            catch (IOException) { Check(true, "locked model save fails without truncation"); }
+        }
+        Check(File.ReadAllText(path) == unchanged && Directory.GetFiles(folder, "*.tmp").Length == 0, "failed atomic save retains original data and removes temporary files");
+        model.RequestUrl = "invalid-url";
+        try { store.Save(new[] { model }); Check(false, "invalid model settings cannot replace valid settings"); }
+        catch (InvalidDataException) { Check(File.ReadAllText(path) == unchanged, "invalid model settings cannot replace valid settings"); }
+        File.WriteAllText(path, "broken"); File.WriteAllText(path + ".bak", "broken");
+        try { store.Load(); Check(false, "unrecoverable model configuration reports a safe error"); }
+        catch (InvalidDataException ex) { Check(!ex.Message.Contains("broken") && File.Exists(path), "unrecoverable model configuration reports a safe error"); }
+
+        var backup = Path.Combine(folder, "startup.json");
+        var values = new Dictionary<string, int> { { "STARTUP", 3 }, { "STARTMODE", 0 }, { "FILEDIA", 1 }, { "CMDDIA", 1 }, { "MENUBAR", 0 }, { "STATUSBAR", 1 } };
+        StartupSettingsBackup.Ensure(backup, values); values["STARTUP"] = 0;
+        StartupSettingsBackup.Ensure(backup, values);
+        Check(StartupSettingsBackup.Read(backup)["STARTUP"] == 3, "repeated startup setup preserves the original preferences");
+        File.WriteAllText(backup, File.ReadAllText(backup).Replace("STATUSBAR", "SECURELOAD"));
+        try { StartupSettingsBackup.Read(backup); Check(false, "startup restore rejects unexpected variables"); }
+        catch (InvalidDataException) { Check(true, "startup restore rejects unexpected variables"); }
+        File.WriteAllText(backup, Json.Serialize(values).Replace("\"STARTUP\":0", "\"STARTUP\":9"));
+        try { StartupSettingsBackup.Read(backup); Check(false, "startup restore rejects out-of-range values"); }
+        catch (InvalidDataException) { Check(true, "startup restore rejects out-of-range values"); }
+        File.WriteAllText(backup, Json.Serialize(values).Replace("\"STARTUP\":0", "\"STARTUP\":0.5"));
+        try { StartupSettingsBackup.Read(backup); Check(false, "startup restore rejects fractional values"); }
+        catch (InvalidDataException) { Check(true, "startup restore rejects fractional values"); }
     }
 
     private static void TestPreparedPlan()

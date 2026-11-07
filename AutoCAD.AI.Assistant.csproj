@@ -69,6 +69,8 @@
     <Compile Include="Models\CadShortcut.cs" />
     <Compile Include="Services\SecretProtector.cs" />
     <Compile Include="Services\ModelSettingsStore.cs" />
+    <Compile Include="Services\AtomicFile.cs" />
+    <Compile Include="Services\StartupSettingsBackup.cs" />
     <Compile Include="Services\OpenAiCompatibleClient.cs" />
     <Compile Include="Services\ImagePreprocessor.cs" />
     <Compile Include="Services\CadDrawingExecutor.cs" />

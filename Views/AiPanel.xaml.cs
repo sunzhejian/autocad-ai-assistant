@@ -52,6 +52,7 @@ namespace AutoCAD.AI.Assistant.Views
             {
                 foreach (var model in _store.Load()) _models.Add(model);
                 ModelCombo.SelectedIndex = _models.Count > 0 ? 0 : -1;
+                if (_store.LastWarning != null) StatusText.Text = _store.LastWarning;
             }
             catch (Exception ex)
             {
