@@ -12,6 +12,12 @@ namespace AutoCAD.AI.Assistant.Services
         public static double UnitFactor(string unit) { return unit == "cm" ? 10 : unit == "m" ? 1000 : 1; }
 
         public static double SuggestDimensionScale(Dictionary<string, object> root)
+        { return SuggestDisplayScale(root, false); }
+
+        public static double SuggestLinetypeScale(Dictionary<string, object> root)
+        { return SuggestDisplayScale(root, true); }
+
+        private static double SuggestDisplayScale(Dictionary<string, object> root, bool linetype)
         {
             if (!root.ContainsKey("views")) return 0;
             var minX = double.MaxValue; var minY = double.MaxValue;
@@ -20,8 +26,12 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 var type = Convert.ToString(c["type"]).ToLowerInvariant();
                 if (type == "frame" || type == "block" || type == "insert") return 0;
-                if (type == "setvar" && (Convert.ToString(c["name"]).Equals("DIMSCALE", StringComparison.OrdinalIgnoreCase)
-                    || Convert.ToString(c["name"]).Equals("DIMTXT", StringComparison.OrdinalIgnoreCase))) return 0;
+                if (type == "setvar")
+                {
+                    var name = Convert.ToString(c["name"]);
+                    if (linetype ? name.Equals("LTSCALE", StringComparison.OrdinalIgnoreCase)
+                        : name.Equals("DIMSCALE", StringComparison.OrdinalIgnoreCase) || name.Equals("DIMTXT", StringComparison.OrdinalIgnoreCase)) return 0;
+                }
                 if (type.StartsWith("dim", StringComparison.Ordinal) || type == "text" || type == "mtext") continue;
                 var points = new List<object>();
                 foreach (var field in new[] { "p1", "p2", "center", "position" }) if (c.ContainsKey(field)) points.Add(c[field]);

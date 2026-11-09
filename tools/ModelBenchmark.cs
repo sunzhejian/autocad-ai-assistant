@@ -17,22 +17,20 @@ internal static class ModelBenchmark
     private static int Main(string[] args)
     {
         System.Net.ServicePointManager.SecurityProtocol |= (System.Net.SecurityProtocolType)3072;
-        if (args.Length < 3) { Console.WriteLine("ModelBenchmark plugin.dll image.png result.json [prompt]"); return 2; }
+        if (args.Length < 3) { Console.WriteLine("ModelBenchmark plugin.dll image.png|- result.json [prompt]; CADAI_BENCH_MODEL selects a configured model ID"); return 2; }
         var report = new Dictionary<string, object>();
         var timer = Stopwatch.StartNew();
         try
         {
             var assembly = Assembly.LoadFrom(Path.GetFullPath(args[0]));
-            var settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoCAD.AI.Assistant", "models.json");
-            var configs = Json.DeserializeObject(File.ReadAllText(settingsPath)) as object[];
-            if (configs == null || configs.Length == 0) throw new Exception("No configured model.");
+            var storeType = assembly.GetType("AutoCAD.AI.Assistant.Services.ModelSettingsStore", true);
+            var store = Activator.CreateInstance(storeType, true);
+            var configs = ((IEnumerable)storeType.GetMethod("Load").Invoke(store, null)).Cast<object>().ToList();
+            if (configs.Count == 0) throw new Exception("No configured model.");
             var modelType = assembly.GetType("AutoCAD.AI.Assistant.Models.ModelConfiguration", true);
-            var model = Activator.CreateInstance(modelType);
-            foreach (var p in (Dictionary<string, object>)configs[0])
-            {
-                var property = modelType.GetProperty(p.Key);
-                if (property != null && property.CanWrite) property.SetValue(model, p.Value, null);
-            }
+            var requested = Environment.GetEnvironmentVariable("CADAI_BENCH_MODEL");
+            var model = String.IsNullOrWhiteSpace(requested) ? configs[0] : configs.SingleOrDefault(c => String.Equals(Convert.ToString(modelType.GetProperty("ModelId").GetValue(c, null)), requested, StringComparison.OrdinalIgnoreCase));
+            if (model == null) throw new Exception("The requested model ID is not configured.");
             report["model"] = modelType.GetProperty("ModelId").GetValue(model, null);
             if (args.Length == 5 && args[3] == "--cache-plan")
             {
@@ -70,15 +68,16 @@ internal static class ModelBenchmark
             var clientType = assembly.GetType("AutoCAD.AI.Assistant.Services.OpenAiCompatibleClient", true);
             var client = Activator.CreateInstance(clientType, true);
             var method = clientType.GetMethods().Single(m => m.Name == "CompleteAsync" && m.GetParameters().Length == 4);
-            var answer = ((Task<string>)method.Invoke(client, new[] { model, history, "", Path.GetFullPath(args[1]) })).GetAwaiter().GetResult();
+            var image = args[1] == "-" ? null : Path.GetFullPath(args[1]);
+            var answer = ((Task<string>)method.Invoke(client, new[] { model, history, "", image })).GetAwaiter().GetResult();
             report["answer"] = answer;
             var match = Regex.Match(answer, @"```(?:cad|json)\s*\r?\n([\s\S]*?)```", RegexOptions.IgnoreCase);
             var plan = match.Success ? match.Groups[1].Value.Trim() : answer.Trim().StartsWith("{") ? answer.Trim() : null;
             report["plan"] = plan;
-            report["validation"] = plan == null ? "No plan" : assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanValidator", true)
+            report["validation"] = plan == null ? (image == null ? null : "No plan") : assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanValidator", true)
                 .GetMethod("Validate").Invoke(null, new object[] { plan });
             if (plan != null) File.WriteAllText(Path.ChangeExtension(args[2], ".plan.json"), plan, new UTF8Encoding(false));
-            report["success"] = plan != null && report["validation"] == null;
+            report["success"] = !String.IsNullOrWhiteSpace(answer) && report["validation"] == null;
         }
         catch (Exception ex)
         {

@@ -60,10 +60,25 @@ public sealed class CadIntegrationTests
         Check(!(bool)startup.GetProperty("IsDesktopHost", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null, null)
             && !(bool)startup.GetField("_pending", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null),
             "headless host skips startup UI and does not retain an idle subscription");
+        var oldLinetypeScale = AcApplication.DocumentManager.MdiActiveDocument.Database.Ltscale;
+        var imageLines = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"views\":[\"section\"],\"commands\":[{\"type\":\"setvar\",\"name\":\"DIMTXT\",\"value\":35},{\"type\":\"line\",\"points\":[[0,0],[1000,1100]],\"layer\":\"中心线\"}]}";
+        Check(Run(imageLines) != null, "image centerline executes with explicit text height");
+        using (var tr = AcApplication.DocumentManager.MdiActiveDocument.Database.TransactionManager.StartTransaction())
+        {
+            var table = (BlockTable)tr.GetObject(AcApplication.DocumentManager.MdiActiveDocument.Database.BlockTableId, OpenMode.ForRead);
+            var space = (BlockTableRecord)tr.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            Line last = null; foreach (ObjectId id in space) { var line = tr.GetObject(id, OpenMode.ForRead) as Line; if (line != null) last = line; }
+            Check(last != null && Math.Abs(last.LinetypeScale * oldLinetypeScale - 100) < 1e-8
+                && AcApplication.DocumentManager.MdiActiveDocument.Database.Ltscale == oldLinetypeScale,
+                "new centerline scale is visible without changing existing drawing linetype scale");
+        }
         var before = Count();
         AcApplication.SetSystemVariable("LWDISPLAY", 0);
         var cm = "{\"sourceUnit\":\"cm\",\"commands\":[{\"type\":\"standard\"},{\"type\":\"rect\",\"p1\":[0,0],\"p2\":[6000,1200]},{\"type\":\"dimlinear\",\"p1\":[0,0],\"p2\":[6000,0],\"position\":[0,-200],\"value\":600,\"confidence\":\"inferred\"}]}";
         Check(Run(cm) != null && Count() == before + 2, "cm geometry created atomically");
+        Check(!AcApplication.DocumentManager.MdiActiveDocument.Database.Dimtih
+            && !AcApplication.DocumentManager.MdiActiveDocument.Database.Dimtoh,
+            "standard dimensions keep vertical text aligned with vertical dimension lines");
         Check(Convert.ToInt32(AcApplication.GetSystemVariable("LWDISPLAY")) == 0, "drawing preserves the user's lightweight lineweight display");
         var receipt = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(LastReceipt));
         Check(Convert.ToBoolean(receipt["native_checks_passed"]) && !Convert.ToBoolean(receipt["source_accuracy_verified"])

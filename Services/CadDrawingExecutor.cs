@@ -85,6 +85,9 @@ namespace AutoCAD.AI.Assistant.Services
                         var layerTable = (LayerTable)transaction.GetObject(database.LayerTableId, OpenMode.ForRead);
                         var automaticScale = CadPlanQuality.SuggestDimensionScale(root);
                         if (automaticScale > 0) database.Dimscale = automaticScale;
+                        var automaticLinetypeScale = CadPlanQuality.SuggestLinetypeScale(root);
+                        if (automaticLinetypeScale > 0)
+                            PrepareLinetypes(commands, automaticLinetypeScale / Math.Max(1e-9, database.Ltscale));
                         var unit = root.ContainsKey("sourceUnit") ? Convert.ToString(root["sourceUnit"]) : "mm";
                         PrepareDimensionUnits(commands, 1.0 / CadPlanQuality.UnitFactor(unit));
                         ExecuteCommands(commands, transaction, database, table, space, layerTable, layers, ref created, ref applied, errors, receipt, "");
@@ -366,6 +369,8 @@ namespace AutoCAD.AI.Assistant.Services
             record.Dimgap = 1.0;
             record.Dimdec = 0;
             record.Dimtad = 1;
+            record.Dimtih = false;
+            record.Dimtoh = false;
             record.Dimzin = 8;
             record.Dimscale = 1.0;
             record.Dimclrd = Color.FromColorIndex(ColorMethod.ByAci, 7);
@@ -769,6 +774,7 @@ namespace AutoCAD.AI.Assistant.Services
 
         private static void ApplyProperties(Entity entity, Dictionary<string, object> command)
         {
+            if (command.ContainsKey("_linetypeFactor")) entity.LinetypeScale = CadPlanQuality.Number(command["_linetypeFactor"]);
             if (command.ContainsKey("color"))
             {
                 var raw = command["color"];
@@ -1164,6 +1170,20 @@ namespace AutoCAD.AI.Assistant.Services
                 var type = Text(c, "type").ToLowerInvariant();
                 if (type == "block") PrepareDimensionUnits((object[])c["commands"], factor);
                 else if (type.StartsWith("dim", StringComparison.Ordinal)) c["_dimensionFactor"] = factor;
+            }
+        }
+
+        private static void PrepareLinetypes(object[] commands, double factor)
+        {
+            foreach (Dictionary<string, object> command in commands)
+            {
+                var type = Text(command, "type").ToLowerInvariant();
+                switch (type)
+                {
+                    case "line": case "polyline": case "rect": case "rectangle": case "ngon": case "polygon":
+                    case "circle": case "arc": case "ellipse": case "spline":
+                        command["_linetypeFactor"] = factor; break;
+                }
             }
         }
 

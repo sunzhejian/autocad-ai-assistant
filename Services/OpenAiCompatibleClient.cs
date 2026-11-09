@@ -23,11 +23,42 @@ namespace AutoCAD.AI.Assistant.Services
             "dimradius{center,point}；dimdiameter{center,point}；block{name,commands}；insert{name,position,rotation,scale}；setvar{name,value}；" +
             "standard{}（建标准图层+仿宋+SL73标注）；frame{size,title,scale,number,company,date,origin}（A0–A4 图框+标题栏，原点0,0；scale 为出图比例如 1:100，执行器按该比例整体放大图框/标题栏/字高，并自动设置 DIMSCALE 与 LTSCALE）。" +
             "规则：含块内部共≤400条；连续折线优先polyline，重复构件用block+insert，勿凑指令数。完整图纸先standard再frame；局部截图不加图框。frame固定按纸面mm生成；源单位坐标布局时，图框宽高/内框边距/字高需除以源单位毫米系数（cm为10，m为1000），避开右下标题栏。尺寸优先于像素比例；从基准和尺寸链计算坐标，保证投影对应和对称；剖面用hatch、图名说明用text。每条图片尺寸标注附value（源图读数）、confidence:read/inferred/unknown；模糊尺寸不得冒充read。source坐标模式下，dimlinear的value须等于端点在rotation方向投影长度，dimaligned为实际距离；dimdiameter的point是圆周点。text只可用<>或<>（估），不可覆盖测量值。无需复述题面。1:100字高为350mm，若sourceUnit=cm则height=35。" +
+            "复刻以源图外观为准，不以通用规范替换图中实际符号。先在内部核对每个视图的外形/内孔/尺寸端点/中心线/图名和下划线数量，再输出完整计划。图名按相对图幅大小取字高，不要把图名放大到接近内孔高度，不自行添加源图没有的双下划线。" +
+            "复刻填充先看实际纹理：原图若是斜线加颗粒，不用只有三角碎石的AR-CONC替代；可用同一points和holes的两个hatch叠加ANSI31和DOTS/AR-SAND。清楚可辨时只指定pattern、spacing及angle，material是纹理辨不清时的近似预设。spacing为源坐标单位下相邻纹理的特征间隔，按图中线距与已读实体尺寸的比值估算。ANSI31自带45度斜线，angle=0保持该角度，angle是额外旋转。单色原图默认color=7，不用灰色弱化其填充。" +
+            "setvar仅支持DIMSCALE/LTSCALE/CELTSCALE/TEXTSIZE/DIMTXT/DIMASZ/DIMEXO/DIMEXE/DIMGAP/DIMDEC/LWDISPLAY/DIMLFAC/DIMTAD/DIMLUNIT/DIMZIN/DIMTIH/DIMTOH/DIMTSZ。竖向尺寸文字需沿尺寸线时DIMTIH=0、DIMTOH=0。尺寸端点按源图区分短斜线与箭头：DIMTSZ>0设置短斜线大小（源单位），DIMTSZ=0使用箭头。" +
             "粗线0.5、图框0.7、细线0.25；图层名含轮廓自动粗线、含中心/轴线自动CENTER、含虚线自动DASHED；" +
             "填充scale省略=自动（1=自动，>1更疏，<1更密）；frame 已按比例设 DIMSCALE/LTSCALE，不要再手动设；未要求画图不输出代码块；不要声称已执行。";
 
         private static readonly HttpClient Http = new HttpClient { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024 };
+        private static readonly object CapabilitySync = new object();
+        private static readonly HashSet<string> NoTemperature = new HashSet<string>(StringComparer.Ordinal);
+
+        private static bool IncludeTemperature(string url, string model)
+        {
+            if (String.Equals((model ?? "").Trim(), "auto", StringComparison.OrdinalIgnoreCase)) return false;
+            lock (CapabilitySync) return !NoTemperature.Contains(url + "\n" + model);
+        }
+        private string SerializeRequest(string url, ChatRequest body, out bool temperatureSent)
+        {
+            var payload = new Dictionary<string, object> { { "model", body.model }, { "messages", body.messages }, { "stream", body.stream } };
+            temperatureSent = IncludeTemperature(url, body.model);
+            if (temperatureSent) payload["temperature"] = body.temperature;
+            return _serializer.Serialize(payload);
+        }
+        private bool LearnTemperatureRejection(string url, string model, int status, string json, bool temperatureSent)
+        {
+            if (!temperatureSent || (status != 400 && status != 422)) return false;
+            var detail = ErrorMessage(json).ToLowerInvariant();
+            if (!detail.Contains("temperature") || !(detail.Contains("not support") || detail.Contains("unsupported") || detail.Contains("does not support"))) return false;
+            lock (CapabilitySync)
+            {
+                if (NoTemperature.Count >= 128) NoTemperature.Clear();
+                NoTemperature.Add(url + "\n" + model);
+            }
+            DiagnosticsLog.Write("请求参数兼容：服务拒绝 temperature，已省略该参数并保留原模型与消息重试一次。");
+            return true;
+        }
 
         public Task<string> CompleteAsync(ModelConfiguration model, IReadOnlyList<ChatItem> history, string drawingContext, string imagePath)
         {
@@ -92,8 +123,7 @@ namespace AutoCAD.AI.Assistant.Services
             try
             {
                 plan = CadPlanText.Extract(answer);
-                error = plan == null ? null : CadPlanValidator.Validate(plan);
-                if (error == null && image && plan != null) error = CadPlanQuality.ImageContractError(plan);
+                error = plan == null ? null : ValidatePlan(plan, image);
             }
             catch (Exception ex) { error = ex.Message; }
             if (error == null) return answer;
@@ -101,24 +131,45 @@ namespace AutoCAD.AI.Assistant.Services
             if (progress != null) progress("尺寸或计划校验未通过，正在修正一次…");
             DiagnosticsLog.Write("计划自动修正：" + error);
             messages.Add(new ChatMessage { role = "assistant", content = answer });
-            messages.Add(new ChatMessage { role = "user", content = "本地校验未通过，尚未执行。只修正以下问题并返回完整唯一cad计划，勿删除尺寸或伪造文字规避校验：\n" + error });
+            messages.Add(new ChatMessage { role = "user", content = "本地校验未通过，尚未执行。一次修正全部问题并返回完整唯一cad计划，勿删除尺寸或伪造文字规避校验。"
+                + (image ? "图片计划须同时补全顶层sourceUnit(mm/cm/m)、coordinateUnit(source)、views(实际可见视图名)，按源单位给出坐标；单位依据图片和用户说明，不得猜测。" : "") + "\n" + error });
             var response = await PostWithRetryAsync(url, key, new ChatRequest { model = model, messages = messages, temperature = 0.1 }, 240, token).ConfigureAwait(false);
             if (!IsSuccess(response.status)) throw new InvalidOperationException("计划修正失败（" + response.status + "），未执行绘图。");
             var repaired = ExtractContent(response.json);
             plan = CadPlanText.Extract(repaired);
-            error = plan == null ? "修正后缺少绘图计划。" : CadPlanValidator.Validate(plan);
-            if (error == null && image) error = CadPlanQuality.ImageContractError(plan);
+            error = plan == null ? "修正后缺少绘图计划。" : ValidatePlan(plan, image);
             if (error != null) { if (plan != null) DiagnosticsLog.SavePlan(plan); throw new InvalidOperationException("修正后校验仍未通过，未执行：" + error); }
             return repaired;
         }
 
+        private static string ValidatePlan(string plan, bool image)
+        {
+            var error = CadPlanValidator.Validate(plan);
+            if (!image) return error;
+            // A geometric error must not hide missing source units/views from
+            // the single permitted repair; report both on that same request.
+            try
+            {
+                var contract = CadPlanQuality.ImageContractError(plan);
+                if (contract != null) error = error == null ? contract : error + "\n" + contract;
+            }
+            catch { if (error == null) throw; }
+            return error;
+        }
+
         private async Task<PostResult> PostWithRetryAsync(string url, string key, ChatRequest body, int timeoutSeconds, CancellationToken token)
         {
-            var result = await PostAsync(url, key, body, timeoutSeconds, token).ConfigureAwait(false);
-            if (result.status != 429 && result.status < 500) return result;
-            DiagnosticsLog.Write("请求重试 状态=" + result.status);
-            await Task.Delay(1500, token).ConfigureAwait(false);
-            return await PostAsync(url, key, body, timeoutSeconds, token).ConfigureAwait(false);
+            var compatibilityRetried = false; var transientRetried = false;
+            while (true)
+            {
+                var result = await PostAsync(url, key, body, timeoutSeconds, token).ConfigureAwait(false);
+                if (!compatibilityRetried && LearnTemperatureRejection(url, body.model, result.status, result.json, result.temperatureSent))
+                { compatibilityRetried = true; continue; }
+                if (transientRetried || (result.status != 429 && result.status < 500)) return result;
+                transientRetried = true;
+                DiagnosticsLog.Write("请求重试 状态=" + result.status);
+                await Task.Delay(1500, token).ConfigureAwait(false);
+            }
         }
 
         private async Task<PostResult> PostAsync(string url, string key, ChatRequest body, int timeoutSeconds, CancellationToken token)
@@ -128,11 +179,12 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 cancellation.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-                request.Content = new StringContent(_serializer.Serialize(body), Encoding.UTF8, "application/json");
+                bool temperatureSent;
+                request.Content = new StringContent(SerializeRequest(url, body, out temperatureSent), Encoding.UTF8, "application/json");
                 using (var response = await Http.SendAsync(request, cancellation.Token).ConfigureAwait(false))
                 {
                     var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    return new PostResult { status = (int)response.StatusCode, json = json };
+                    return new PostResult { status = (int)response.StatusCode, json = json, temperatureSent = temperatureSent };
                 }
             }
         }
@@ -145,14 +197,22 @@ namespace AutoCAD.AI.Assistant.Services
                 cancellation.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
                 try
                 {
+                    for (var compatibilityAttempt = 0; compatibilityAttempt < 2; compatibilityAttempt++)
+                    {
                     using (var request = new HttpRequestMessage(HttpMethod.Post, url))
                     {
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
                         var body = new ChatRequest { model = modelId, messages = messages, temperature = 0.2, stream = true };
-                        request.Content = new StringContent(_serializer.Serialize(body), Encoding.UTF8, "application/json");
+                        bool temperatureSent;
+                        request.Content = new StringContent(SerializeRequest(url, body, out temperatureSent), Encoding.UTF8, "application/json");
                         using (var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation.Token).ConfigureAwait(false))
                         {
-                            if (!IsSuccess((int)response.StatusCode)) return null;
+                            if (!IsSuccess((int)response.StatusCode))
+                            {
+                                var error = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                if (compatibilityAttempt == 0 && LearnTemperatureRejection(url, modelId, (int)response.StatusCode, error, temperatureSent)) continue;
+                                return null;
+                            }
                             var builder = new StringBuilder();
                             using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                             using (cancellation.Token.Register(() => stream.Dispose()))
@@ -175,6 +235,8 @@ namespace AutoCAD.AI.Assistant.Services
                             return text.Length == 0 ? null : text;
                         }
                     }
+                    }
+                    return null;
                 }
                 catch (OperationCanceledException)
                 {
@@ -326,6 +388,7 @@ namespace AutoCAD.AI.Assistant.Services
         {
             public int status { get; set; }
             public string json { get; set; }
+            public bool temperatureSent { get; set; }
         }
 
         private sealed class ChatResponse

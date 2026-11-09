@@ -42,6 +42,8 @@ internal static class RegressionTests
             TestBufferedLogs();
             TestValidation();
             TestPreparedPlan();
+            TestImageLinetypes();
+            TestDimensionFormatVariables();
             TestMaterials();
             TestHatchBoundaries();
             foreach (var fixture in Directory.GetFiles("tests/fixtures", "*.json"))
@@ -54,6 +56,7 @@ internal static class RegressionTests
             TestCache(folder);
             TestPdfSnapshot(folder);
             TestClient().GetAwaiter().GetResult();
+            TestAutoCompatibility().GetAwaiter().GetResult();
             Console.WriteLine("TOTAL " + Passed + " passed"); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex); return 1; }
@@ -104,6 +107,36 @@ internal static class RegressionTests
         File.WriteAllText(backup, Json.Serialize(values).Replace("\"STARTUP\":0", "\"STARTUP\":0.5"));
         try { StartupSettingsBackup.Read(backup); Check(false, "startup restore rejects fractional values"); }
         catch (InvalidDataException) { Check(true, "startup restore rejects fractional values"); }
+    }
+
+    private static void TestDimensionFormatVariables()
+    {
+        var ticks = Plan("{\"type\":\"setvar\",\"name\":\"DIMTSZ\",\"value\":2}");
+        ticks = ticks.Replace("{\"commands\":", "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":");
+        var normalizedTicks = (Dictionary<string, object>)Json.DeserializeObject(CadPlanNormalizer.Normalize(ticks));
+        Check(CadPlanQuality.Number(((Dictionary<string, object>)((object[])normalizedTicks["commands"])[0])["value"]) == 20,
+            "dimension tick size follows source length units");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"setvar\",\"name\":\"DIMTSZ\",\"value\":0}")) == null
+            && CadPlanValidator.Validate(Plan("{\"type\":\"setvar\",\"name\":\"DIMTSZ\",\"value\":-1}")) != null,
+            "zero tick size enables arrows and negative tick size is rejected");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"setvar\",\"name\":\"DIMTAD\",\"value\":1},{\"type\":\"setvar\",\"name\":\"DIMLUNIT\",\"value\":2},{\"type\":\"setvar\",\"name\":\"DIMZIN\",\"value\":8},{\"type\":\"setvar\",\"name\":\"DIMTIH\",\"value\":0},{\"type\":\"setvar\",\"name\":\"DIMTOH\",\"value\":0}")) == null,
+            "safe native dimension formatting does not require an AI repair");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"setvar\",\"name\":\"DIMTIH\",\"value\":2}")) != null
+            && CadPlanValidator.Validate(Plan("{\"type\":\"setvar\",\"name\":\"DIMLUNIT\",\"value\":0}")) != null
+            && CadPlanValidator.Validate(Plan("{\"type\":\"setvar\",\"name\":\"DIMTAD\",\"value\":0.5}")) != null,
+            "dimension format variables reject invalid enum and fractional values");
+    }
+
+    private static void TestImageLinetypes()
+    {
+        var plan = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"views\":[\"section\"],\"commands\":[{\"type\":\"setvar\",\"name\":\"DIMTXT\",\"value\":35},{\"type\":\"rect\",\"p1\":[0,0],\"p2\":[1000,1100]}]}";
+        var root = (Dictionary<string, object>)Json.DeserializeObject(CadPlanNormalizer.Normalize(plan));
+        Check(CadPlanQuality.SuggestDimensionScale(root) == 0 && CadPlanQuality.SuggestLinetypeScale(root) == 100,
+            "source text height does not suppress visible centerline scale");
+        root = (Dictionary<string, object>)Json.DeserializeObject(CadPlanNormalizer.Normalize(plan.Replace("DIMTXT", "LTSCALE")));
+        Check(CadPlanQuality.SuggestLinetypeScale(root) == 0, "explicit source linetype scale is preserved");
+        root.Remove("views");
+        Check(CadPlanQuality.SuggestLinetypeScale(root) == 0, "ordinary text drawing does not trigger source linetype scaling");
     }
 
     private static void TestPreparedPlan()
@@ -353,6 +386,87 @@ internal static class RegressionTests
     { return new ModelConfiguration { ModelId = "test", RequestUrl = server.Url, UseFullUrl = true, ApiKeyProtected = SecretProtector.Protect("local-test-key") }; }
     private static List<ChatItem> History()
     { return new List<ChatItem> { new ChatItem { IsUser = true, Content = "OLD_HISTORY_1_1000" }, new ChatItem { IsUser = true, Content = "复刻可见视图" } }; }
+
+    private static bool HasTemperature(string request)
+    { return ((Dictionary<string, object>)Json.DeserializeObject(request)).ContainsKey("temperature"); }
+    private static string StreamReply(string content)
+    { return "data: " + Json.Serialize(new { choices = new[] { new { delta = new { content = content } } } }) + "\n\ndata: [DONE]\n\n"; }
+    private static async Task TestAutoCompatibility()
+    {
+        const string unsupported = "{\"error\":{\"message\":\"model does not support parameter(s): temperature; please remove them from your request\"}}";
+        Func<string, string> text = value => Json.Serialize(new { choices = new[] { new { message = new { content = value } } } });
+        var valid = Plan("{\"type\":\"circle\",\"center\":[0,0],\"radius\":20}");
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, text("AUTO_OK"));
+            var model = Model(s); model.ModelId = "auto";
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", null);
+            Check(answer == "AUTO_OK" && !HasTemperature(s.Requests[0]), "auto omits temperature entirely rather than sending zero or null");
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, Reply(i == 1 ? valid.Replace(":20", ":-1") : valid));
+            var model = Model(s); model.ModelId = "AUTO";
+            await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", null);
+            Check(s.Requests.Count == 2 && !HasTemperature(s.Requests[0]) && !HasTemperature(s.Requests[1]), "auto plan repair also omits temperature");
+        }
+        using (var s = new Server())
+        {
+            var imagePlan = "{\"sourceUnit\":\"mm\",\"views\":[\"section\"],\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":20}]}";
+            s.Response = i => Tuple.Create(200, Reply(imagePlan));
+            var model = Model(s); model.ModelId = "auto";
+            await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", ImagePath);
+            Check(!HasTemperature(s.Requests[0]) && s.Requests[0].Contains("image_url"), "auto vision keeps its image while omitting temperature");
+        }
+        using (var s = new Server())
+        {
+            var bad = Plan("{\"type\":\"hatch\",\"points\":[[[0,0],[20,0],[20,10],[0,10]]],\"pattern\":\"ANSI31\"}");
+            var repaired = "{\"sourceUnit\":\"mm\",\"coordinateUnit\":\"source\",\"views\":[\"section\"],\"commands\":[{\"type\":\"hatch\",\"points\":[[0,0],[20,0],[20,10],[0,10]],\"pattern\":\"ANSI31\"}]}";
+            s.Response = i => Tuple.Create(200, Reply(i == 1 ? bad : repaired));
+            var model = Model(s); model.ModelId = "auto";
+            await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", ImagePath);
+            Check(s.Requests.Count == 2 && s.Requests[1].Contains("sourceUnit") && s.Requests[1].Contains("hatch")
+                && s.Requests[1].Contains("image_url") && !HasTemperature(s.Requests[1]),
+                "auto vision repair receives geometry and source metadata errors together with the original image");
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => i == 1 ? Tuple.Create(400, unsupported) : Tuple.Create(200, text("OK"));
+            var model = Model(s); model.ModelId = "parameter-router";
+            var client = new OpenAiCompatibleClient();
+            await client.CompleteAsync(model, History(), "", null);
+            Check(s.Requests.Count == 2 && HasTemperature(s.Requests[0]) && !HasTemperature(s.Requests[1]), "explicit temperature rejection retries once without the unsupported field");
+            var first = (Dictionary<string, object>)Json.DeserializeObject(s.Requests[0]);
+            var second = (Dictionary<string, object>)Json.DeserializeObject(s.Requests[1]); first.Remove("temperature");
+            Check(Json.Serialize(first) == Json.Serialize(second), "parameter compatibility preserves model, prompts, messages and stream setting");
+            await client.CompleteAsync(model, History(), "", null);
+            Check(s.Requests.Count == 3 && !HasTemperature(s.Requests[2]), "learned model capability avoids the next failed request");
+            model.ModelId = "another-model";
+            await client.CompleteAsync(model, History(), "", null);
+            Check(HasTemperature(s.Requests[3]), "temperature compatibility is scoped to endpoint and model");
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(400, "{\"error\":{\"message\":\"temperature must be a number\"}}");
+            try { await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null); Check(false, "invalid temperature value is not an unsupported capability"); }
+            catch (InvalidOperationException) { Check(s.Requests.Count == 1, "invalid temperature value is not an unsupported capability"); }
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, StreamReply("AUTO_STREAM_OK"));
+            var model = Model(s); model.ModelId = "auto"; var delta = new StringBuilder();
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", null, value => delta.Append(value));
+            Check(answer == "AUTO_STREAM_OK" && delta.ToString() == answer && s.Requests.Count == 1 && !HasTemperature(s.Requests[0]), "auto streaming omits temperature without nonstream fallback");
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => i == 1 ? Tuple.Create(400, unsupported) : Tuple.Create(200, StreamReply("STREAM_OK"));
+            var model = Model(s); model.ModelId = "stream-router";
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", null, value => { });
+            Check(answer == "STREAM_OK" && s.Requests.Count == 2 && !HasTemperature(s.Requests[1]) && s.Requests[1].Contains("\"stream\":true"),
+                "streaming compatibility retries the same streaming request once");
+        }
+    }
 
     private static async Task TestClient()
     {

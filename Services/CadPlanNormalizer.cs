@@ -27,7 +27,7 @@ namespace AutoCAD.AI.Assistant.Services
                 if (type == "setvar" && c.ContainsKey("value"))
                 {
                     var name = Convert.ToString(c["name"]).ToUpperInvariant();
-                    if (name == "TEXTSIZE" || name == "DIMTXT" || name == "DIMASZ" || name == "DIMEXO" || name == "DIMEXE" || name == "DIMGAP")
+                    if (name == "TEXTSIZE" || name == "DIMTXT" || name == "DIMASZ" || name == "DIMEXO" || name == "DIMEXE" || name == "DIMGAP" || name == "DIMTSZ")
                         c["value"] = CadPlanQuality.Number(c["value"]) * factor;
                 }
                 foreach (var field in new[] { "p1", "p2", "center", "position", "point", "origin" })

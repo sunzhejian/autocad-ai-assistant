@@ -4,14 +4,16 @@ import sys
 import uuid
 from pathlib import Path
 
-executable, script, log = sys.argv[1:]
+executable, script, log = sys.argv[1:4]
+input_drawing = sys.argv[4:5]
 # FILEDIA and other profile variables are shared with desktop AutoCAD unless
 # /isolate is used. Keep even failed or timed-out test runs out of that profile.
 user_data = Path(script).resolve().parent / "coreconsole-user"
 user_data.mkdir(parents=True, exist_ok=True)
 isolation_id = "cadai_" + uuid.uuid4().hex
 try:
-    result = subprocess.run([executable, "/s", script, "/l", "en-US",
+    drawing_args = ["/i", input_drawing[0]] if input_drawing else []
+    result = subprocess.run([executable, *drawing_args, "/s", script, "/l", "en-US",
                              "/isolate", isolation_id, str(user_data)], stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, timeout=120,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

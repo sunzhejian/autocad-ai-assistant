@@ -242,6 +242,13 @@ namespace AutoCAD.AI.Assistant.Services
                 var numeric = Numeric(command, "value");
                 if (numeric != null) return numeric;
                 var value = ToNumber(command["value"]);
+                if (name == "DIMTAD" || name == "DIMLUNIT" || name == "DIMZIN" || name == "DIMTIH" || name == "DIMTOH")
+                {
+                    var minimum = name == "DIMLUNIT" ? 1 : 0;
+                    var maximum = name == "DIMTAD" ? 4 : name == "DIMLUNIT" ? 6 : name == "DIMZIN" ? 15 : 1;
+                    return value >= minimum && value <= maximum && value == Math.Floor(value) ? null : name + " 的整数值超出允许范围。";
+                }
+                if (name == "DIMTSZ") return value >= 0 ? null : "DIMTSZ 不得小于 0。";
                 if (name == "LWDISPLAY" && value != 0 && value != 1) return "LWDISPLAY 仅支持 0/1。";
                 if (name == "DIMDEC" && (value < 0 || value > 8 || value != Math.Floor(value))) return "DIMDEC 需为 0–8 整数。";
                 if (name != "LWDISPLAY" && name != "DIMDEC" && value <= 0) return name + " 必须大于 0。";
@@ -251,7 +258,7 @@ namespace AutoCAD.AI.Assistant.Services
         }
 
         internal static readonly HashSet<string> DrawingVariables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        { "DIMSCALE", "LTSCALE", "CELTSCALE", "TEXTSIZE", "DIMTXT", "DIMASZ", "DIMEXO", "DIMEXE", "DIMGAP", "DIMDEC", "LWDISPLAY", "DIMLFAC" };
+        { "DIMSCALE", "LTSCALE", "CELTSCALE", "TEXTSIZE", "DIMTXT", "DIMASZ", "DIMEXO", "DIMEXE", "DIMGAP", "DIMDEC", "LWDISPLAY", "DIMLFAC", "DIMTAD", "DIMLUNIT", "DIMZIN", "DIMTIH", "DIMTOH", "DIMTSZ" };
 
         private static string CheckOptionalNumbers(Dictionary<string, object> command)
         {

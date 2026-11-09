@@ -5,7 +5,7 @@
 ![AutoCAD 2024](https://img.shields.io/badge/AutoCAD-2024-red)
 ![Windows x64](https://img.shields.io/badge/Windows-x64-blue)
 
-AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前版本 **1.3.1**，.NET Framework 4.8 / Windows x64。
+AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前版本 **1.3.3**，.NET Framework 4.8 / Windows x64。
 
 **AutoCAD 2024 assistant for Windows:** native drawing tools, local vector PDF import, image-to-CAD plans, unit and hatch validation, atomic undo, and OpenAI-compatible model configuration. AI reconstruction still needs human review.
 
@@ -22,7 +22,7 @@ AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，
 | 扫描 PDF / 局部细节 | 页预览或框选后由视觉模型重建 |
 | 日常制图 | 27 个常用入口、完整原生功能区和可恢复的预览设置 |
 
-v1.3.1 增加配置原子保存与备份恢复、启动偏好恢复命令、安装包完整性检查及公开提交检查。模型配置、密钥、赛题原文件和运行产物保留在本地，不随安装包分发。图片或文字发送到所配置的模型服务前，请确认输入适合交给该服务。
+v1.3.3 修复 `auto` 不接受 `temperature` 的请求错误，普通请求、流式输出和计划修正共用参数兼容机制；图片修正同时报告几何与单位/视图信息问题。同步改进局部图线型比例、竖向尺寸文字、短斜线端点和源图填充提示。模型配置、密钥、赛题原文件和运行产物保留在本地，不随安装包分发。图片或文字发送到所配置的模型服务前，请确认输入适合交给该服务。
 
 ## 使用
 
@@ -34,6 +34,8 @@ v1.3.1 增加配置原子保存与备份恢复、启动偏好恢复命令、安�
 6. “复用已执行计划”默认开启。相同图片内容、提示、模型配置、协议与分块模式可复用七天内的计划；取消勾选可重新识别。该缓存只证明计划曾成功执行，源图识别仍需核对。
 
 `AIPLAN` 可读取本地 JSON 计划；`AIDRAW` 为面板的绘图队列命令。请求中“发送”变为“取消”，图片请求总预算 240 秒、文本 120 秒，包含重试和自动修正。切换/关闭原图形后不会把结果画入另一张图。
+
+模型 ID 为 `auto` 时不发送 `temperature` 字段；其他模型仅在服务明确拒绝该参数时去掉它并重试一次，兼容结果按地址与模型在内存中缓存。模型 ID、消息和图片保持原值。`auto` 的底层模型由所配置服务路由，插件不能据此确认实际供应商或保证识图精度。[auto 实测与复刻差距](docs/auto-1.3.3-2026-11-09.md) 保留了成功和失败结果。
 
 ### PDF 赛题
 
@@ -71,7 +73,7 @@ v1.2.1 默认关闭命令频次统计；可在“指令集”勾选“统计命�
 
 聊天保留最近 40 条可见消息和 12 条完整上下文消息（实际模型请求仍选最近 8 条）；长消息只展示前 8000 字符。聊天图片在后台解码，最长边 480 像素、最多同时解码 2 张；附件预览最长边 256 像素，模型仍使用原图处理流程。
 
-鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板名称应显示 **AI 1.3.1**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
+鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板名称应显示 **AI 1.3.3**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
 
 v1.2.2 图片复刻跳过旧图上下文；文字请求最多抽样 512 个图元、读取 128 个简单范围，以 25ms 为扫描目标（单次原生调用不可中断）。返回的类型与范围明确标为抽样，CAD 命令执行中则跳过扫描。面板的缓存读取与计划预检在后台运行，执行前再次核对图形状态。
 
@@ -100,7 +102,7 @@ powershell -File tools\Test-Pdf-Cad.ps1 -SourcePdf '赛题.pdf' -Page 3 -PlotPdf
 .\Install.ps1
 ```
 
-纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。v1.3.1 当前为 98 项纯回归和 30 项原生集成检查；GitHub CI 另执行 PDF worker 测试和提交文件检查，不声称在云端完成有许可的原生 CAD 验证。
+纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。v1.3.3 当前为 116 项纯回归和 33 项原生集成检查；GitHub CI 另执行 PDF worker 测试和提交文件检查，不声称在云端完成有许可的原生 CAD 验证。
 
 ## 本地题库复刻
 
@@ -111,6 +113,6 @@ python tools\render_reproductions.py
 powershell -File tools\Reproduce-Cad.ps1 -Plan tests\fixtures\hebei-earth-dam-reviewed.json -Name hebei-earth-dam -PlotPdf
 ```
 
-PDF 工具依赖 `pymupdf`；预览工具依赖 `ezdxf` 和 `matplotlib`。`ModelBenchmark.cs` 使用实际插件 DLL 与已有本地模型配置发送真实请求；生成可执行文件后，其参数为 `插件.dll 图片.png 结果.json [提示]`。真实请求会使用所配置服务的额度。
+PDF 工具依赖 `pymupdf`；预览工具依赖 `ezdxf` 和 `matplotlib`。`ModelBenchmark.cs` 使用实际插件 DLL 与已有本地模型配置发送真实请求；生成可执行文件后，其参数为 `插件.dll 图片.png或- 结果.json [提示]`，`-` 表示文字请求；环境变量 `CADAI_BENCH_MODEL` 选择已有配置中的模型 ID。真实请求会使用所配置服务的额度。`Export-Drawing.ps1` 可复制已有 DWG 并导出原生 PDF/DXF，不重画图元；`verify_section_reproduction.py` 校核第六届 3-3 断面选定的几何、尺寸端点和填充语义，不能证明像素一致。
 
 已索引题库目录内 17 份 PDF、637 页，包含通知、标准、真题和答案；已选取第五届整图、第六届 3-3 断面、第七届扭面大样及河北样题土坝图做复刻。原始 PDF、图片、密钥、本地模型配置和运行产物均不上传。仓库保留三个模型生成计划及一个人工核对后的土坝计划，作为可重复的回归样本。[土坝复刻记录](docs/hebei-earth-dam-2026-11-05.md) 区分了模型输出与人工修订。本次工作不涉及远程模型权重微调。
