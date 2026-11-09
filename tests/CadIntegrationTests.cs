@@ -174,7 +174,7 @@ public sealed class CadIntegrationTests
             new { type="solid", points=new[]{new[]{5150,0},new[]{5160,0},new[]{5160,5},new[]{5150,5}}, layer="FEATURE_TEST" },
             new { type="polyline", points=new[]{new[]{5200,0},new[]{5210,0}}, bulges=new[]{1,0}, layer="FEATURE_TEST" },
             new { type="dimangular", center=new[]{5300,0}, p1=new[]{5310,0}, p2=new[]{5300,10}, position=new[]{5305,5}, value=90, layer="FEATURE_TEST" },
-            new { type="leader", points=new[]{new[]{5400,0},new[]{5410,10}}, position=new[]{5420,10}, height=.35, arrowSize=.2, content="C30混凝土", layer="FEATURE_TEST" },
+            new { type="leader", points=new[]{new[]{5400,0},new[]{5410,10}}, position=new[]{5420,10}, height=.35, arrowSize=.2, content="引线测试", layer="FEATURE_TEST" },
             new { type="mtext", position=new[]{5450,0}, height=.35, content="说明\n复核", layer="FEATURE_TEST" }
         };
         var before = Count();
@@ -212,7 +212,7 @@ public sealed class CadIntegrationTests
                 {
                     var leaders=ml.GetLeaderIndexes(); var lines=ml.GetLeaderLineIndexes(Convert.ToInt32(leaders[0]));
                     using(var text=ml.MText)leaderOk=ml.GetFirstVertex(Convert.ToInt32(lines[0])).DistanceTo(new Autodesk.AutoCAD.Geometry.Point3d(54000,0,0))<1e-8
-                        && text.Text.Contains("C30混凝土") && Math.Abs(ml.TextHeight-3.5)<1e-8 && Math.Abs(ml.ArrowSize-2)<1e-8;
+                        && text.Text.Contains("引线测试") && Math.Abs(ml.TextHeight-3.5)<1e-8 && Math.Abs(ml.ArrowSize-2)<1e-8;
                     leaderOk &= ml.VerticesCount(Convert.ToInt32(lines[0]))>=3 && ml.GetVertex(Convert.ToInt32(lines[0]),1)
                         .DistanceTo(new Autodesk.AutoCAD.Geometry.Point3d(54100,100,0))<1e-8;
                 }

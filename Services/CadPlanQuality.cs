@@ -106,6 +106,40 @@ namespace AutoCAD.AI.Assistant.Services
             }
         }
 
+        internal static List<string> MaterialLeaderErrors(object[] commands, string prefix)
+        {
+            var errors = new List<string>();
+            for (var i = 0; i < commands.Length; i++)
+            {
+                var c = (Dictionary<string, object>)commands[i];
+                var type = Convert.ToString(c["type"]).ToLowerInvariant();
+                var path = prefix + (i + 1);
+                if (type == "block") { errors.AddRange(MaterialLeaderErrors((object[])c["commands"], path + ".")); continue; }
+                if (type != "leader" || !c.ContainsKey("material")) continue;
+                string expected; double paper;
+                if (!HatchMaterialPolicy.TryResolve(Convert.ToString(c["material"]), out expected, out paper))
+                { errors.Add("第 " + path + " 条：材料引线的 material 未知。"); continue; }
+                var target = c.ContainsKey("targetLayer") ? Convert.ToString(c["targetLayer"]) : "";
+                if (String.IsNullOrWhiteSpace(target))
+                { errors.Add("第 " + path + " 条：材料引线必须指定 targetLayer，指向实际材料填充。"); continue; }
+                var tip = ReadPoint(((object[])c["points"])[0]);
+                var patterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (Dictionary<string, object> h in commands)
+                {
+                    if (!Convert.ToString(h["type"]).Equals("hatch", StringComparison.OrdinalIgnoreCase)
+                        || !h.ContainsKey("layer") || !Convert.ToString(h["layer"]).Equals(target, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!HatchBoundaryValidator.ContainsMaterial(h, tip)) continue;
+                    var pattern = h.ContainsKey("pattern") ? Convert.ToString(h["pattern"]) : "ANSI31";
+                    if (h.ContainsKey("material")) { string resolved; double size; if (HatchMaterialPolicy.TryResolve(Convert.ToString(h["material"]), out resolved, out size)) pattern = resolved; }
+                    patterns.Add(pattern);
+                }
+                var matches = patterns.Contains(expected) || (expected == "AR-CONC" && patterns.Contains("ANSI31")
+                    && (patterns.Contains("DOTS") || patterns.Contains("AR-SAND")));
+                if (!matches) errors.Add("第 " + path + " 条：材料引线箭头未落在 targetLayer 的对应材料填充内（不能落空、指向内孔或用黑块代替材料纹理）。");
+            }
+            return errors;
+        }
+
         internal static double Number(object value) { return Convert.ToDouble(value, CultureInfo.InvariantCulture); }
         internal static double AngularDegrees(Dictionary<string, object> c)
         {

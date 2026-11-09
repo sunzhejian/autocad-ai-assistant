@@ -19,7 +19,8 @@ namespace AutoCAD.AI.Assistant.Services
             "layer{name,color,linetype,lineweight}；line{points}；polyline{points,closed,width}；rect{p1,p2}；" +
             "ngon{center,sides,radius}；circle{center,radius}；arc{center,radius,start,end}；ellipse{center,major,ratio}；" +
             "donut{center,innerDiameter,outerDiameter}（原生带宽圆环，0≤内径<外径）；solid{points}（按边界顺序3点三角形或4点凸四边形的二维实心区域）；" +
-            "leader{points,position,height,content,arrowSize}（原生多重引线，points依次为箭头尖、折点，position为文字位置，不能用几条散线冒充）；" +
+            "leader{points,position,height,content,arrowSize,material,targetLayer}（原生多重引线，points依次为箭头尖、折点，position为文字位置，不能用几条散线冒充）；" +
+            "材料剖面必须画实际封闭轮廓、材料hatch及内孔；混凝土等材料引线须同时给material与targetLayer，箭头尖必须落在该层的真实材料填充内，不能指向空白或孔洞。混凝土不可用孤立黑色solid三角形/矩形代替；无源图时可用material:concrete，源图已给纹理时优先照源图。仅做引线语法测试时用“引线测试”等通用文字，不冒充材料构件。" +
             "dimangular{center,p1,p2,position,value}（真实原生小角标注，center为顶点、p1/p2为射线上点，position在小角扇区内；value始终为度，不随cm/m换算，角度须0<值<180）；" +
             "polyline可带bulges数组，与points等长；每值为该顶点至下一顶点圆弧的tan(扫角/4)，正值逆时针，负值顺时针，0为直线，半圆为±1；开放折线末值为0，弧不能用很多短线代替。" +
             "spline{points}；point{position}；text{position,height,content}；mtext{position,height,width,content}；" +

@@ -47,6 +47,7 @@ internal static class RegressionTests
             TestNewDrawingFeatures();
             TestMaterials();
             TestHatchBoundaries();
+            TestMaterialLeaders();
             foreach (var fixture in Directory.GetFiles("tests/fixtures", "*.json"))
             {
                 var plan = File.ReadAllText(fixture, Encoding.UTF8);
@@ -138,12 +139,39 @@ internal static class RegressionTests
         Check(CadPlanValidator.Validate(Plan(curve.Replace("[1,0]", "[1,1]"))) != null, "open polyline cannot hide an unused last arc");
         Check(CadPlanValidator.Validate(Plan(curve.Replace("[1,0]", "[1e99,0]"))) != null, "polyline rejects extreme bulges");
         Check(CadPlanValidator.Validate(Plan(curve.Replace("[10,0]", "[0,0]"))) != null, "polyline rejects coincident arc endpoints");
-        var leader = "{\"type\":\"leader\",\"points\":[[0,0],[10,10]],\"position\":[20,10],\"height\":3.5,\"content\":\"C30混凝土\"}";
+        var leader = "{\"type\":\"leader\",\"points\":[[0,0],[10,10]],\"position\":[20,10],\"height\":3.5,\"content\":\"引线测试\"}";
         Check(CadPlanValidator.Validate(Plan(leader)) == null, "leader accepts a tip bend and annotation");
-        Check(CadPlanValidator.Validate(Plan(leader.Replace("C30混凝土", ""))) != null, "leader rejects missing annotation text");
+        Check(CadPlanValidator.Validate(Plan(leader.Replace("引线测试", ""))) != null, "leader rejects missing annotation text");
         Check(CadPlanValidator.Validate(Plan(leader.Replace("[10,10]", "[0,0]"))) != null, "leader rejects zero length segments");
         Check(CadPlanValidator.Validate(Plan(curve.Replace("\"type\":\"polyline\"", "\"type\":\"polyline\",\"closed\":\"true\""))) != null, "polyline rejects a nonboolean closure flag");
         Check(CadPlanValidator.Validate(Plan(curve.Replace("\"type\":\"polyline\"", "\"type\":\"polyline\",\"width\":-1"))) != null, "polyline rejects negative widths");
+    }
+
+    private static void TestMaterialLeaders()
+    {
+        var hatch = "{\"type\":\"hatch\",\"layer\":\"MAT\",\"material\":\"concrete\",\"points\":[[0,0],[100,0],[100,100],[0,100]],\"holes\":[[[20,20],[80,20],[80,80],[20,80]]]}";
+        var leader = "{\"type\":\"leader\",\"points\":[[10,50],[-20,80]],\"position\":[-60,80],\"height\":3.5,\"content\":\"C30混凝土\",\"material\":\"concrete\",\"targetLayer\":\"MAT\"}";
+        var valid = Plan(hatch + "," + leader);
+        Check(CadPlanValidator.Validate(valid) == null, "material leader targets a real concrete hatch region");
+        Check(CadPlanValidator.Validate(Plan(hatch + "," + leader.Replace(",\"targetLayer\":\"MAT\"", ""))) != null,
+            "material leader cannot omit its target layer");
+        Check(CadPlanValidator.Validate(Plan(hatch + "," + leader.Replace("[10,50]", "[-10,50]"))) != null,
+            "material leader cannot point at blank space");
+        Check(CadPlanValidator.Validate(Plan(hatch + "," + leader.Replace("[10,50]", "[50,50]"))) != null,
+            "material leader cannot point into an unfilled hole");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"solid\",\"layer\":\"MAT\",\"points\":[[0,0],[100,0],[100,100],[0,100]]}," + leader)) != null,
+            "black solid is not accepted as a concrete material hatch");
+        Check(CadPlanValidator.Validate(valid.Replace("\"material\":\"concrete\",\"points\":[[0,0]", "\"material\":\"earth\",\"points\":[[0,0]")) != null,
+            "concrete label cannot target earth material");
+        var diagonal = hatch.Replace("\"material\":\"concrete\"", "\"pattern\":\"ANSI31\"");
+        var particles = hatch.Replace("\"material\":\"concrete\"", "\"pattern\":\"AR-SAND\"");
+        Check(CadPlanValidator.Validate(Plan(diagonal + "," + particles + "," + leader)) == null,
+            "source diagonal and particle concrete textures can share a material leader");
+        var source = valid.Replace("{\"commands\":", "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":");
+        Check(CadPlanValidator.Validate(source) == null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(source)) == null,
+            "material target relationship survives source unit conversion");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"block\",\"name\":\"MATERIAL_BLOCK\",\"commands\":[" + hatch + "," + leader + "]}")) == null,
+            "material targets inside a block are checked in their own coordinate scope");
     }
 
     private static void TestDimensionFormatVariables()

@@ -7,7 +7,7 @@
 | 能力 | 计划字段 | 示例请求与范围 |
 | --- | --- | --- |
 | 真实角度标注 | `dimangular{center,p1,p2,position,value}` | 标出两射线之间的 45°；center 是顶点，position 在小角扇区内；目前支持大于 0°、小于 180°的小角 |
-| 多重引线 | `leader{points,position,height,content,arrowSize}` | 指向某一点注明 C30 混凝土；points 从箭头尖开始依次列折点，position 为文字位置；生成一个 MLeader |
+| 多重引线 | `leader{points,position,height,content,arrowSize,material,targetLayer}` | points 从箭头尖开始依次列折点，position 为文字位置；材料标签须带 material、targetLayer 并指向实际填充区域；生成一个 MLeader |
 | 带宽圆环、圆盘 | `donut{center,innerDiameter,outerDiameter}` | 画内径 20、外径 40 的实心圆环；内径为 0 时生成圆盘，不能用两个细圆轮廓代替 |
 | 二维实心区域 | `solid{points}` | 画实心三角形或凸四边形；顶点沿边界排列，执行器处理 AutoCAD 的内部顶点顺序；凹多边形需分成凸区域 |
 | 多段线圆弧段 | `polyline{points,bulges,closed,width}` | 绘制直线与圆弧连成一体的多段线；bulges 与 points 等长，值为 tan(扫角/4)，正数逆时针、负数顺时针；开放线末值为 0 |
@@ -15,6 +15,8 @@
 这些几何长度按 `sourceUnit/coordinateUnit` 统一换算为毫米；角度 `value` 始终用度，bulge 是无量纲量。角度标注使用原生测量值，固定文字不能伪装角度；回执同时保留原生弧度值和换算后的度数。
 
 ## 已有能力
+
+1.4.2 增加材料引线校核。混凝土等材料剖面需要真实封闭外轮廓、材料填充及内孔；材料引线的箭头不得落在空白或孔洞中，也不能用黑色实心三角形、矩形占位。混凝土预设使用 AR-CONC；已有源图时优先按源图材料纹理，支持同区域的斜线与颗粒组合。普通引线语法测试用“引线测试”等通用文字，不再使用悬空的 C30 材料标签。
 
 直线、多段线、矩形、正多边形、圆、圆弧、椭圆、样条、点；单行/多行文字；线性、对齐、半径、直径尺寸；带内孔填充与材料预设；块定义及旋转/缩放插入；图层、文字样式、标准样式和 A0–A4 图框。允许的绘图变量仍使用白名单。
 

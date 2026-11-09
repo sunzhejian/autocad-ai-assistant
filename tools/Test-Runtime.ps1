@@ -23,7 +23,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'PDF worker checks failed' }
     & python tools\audit_public.py --history
     if ($LASTEXITCODE -ne 0) { throw 'Public source audit failed' }
-    $previewCases = @('annotations','angular','rings','hatch')
+    $previewCases = @('concrete','angular','rings','hatch')
     $missingDrawings = @($previewCases | Where-Object { -not (Test-Path -LiteralPath (Join-Path $DrawingSuiteDirectory ($_+'.dwg'))) })
     if ($missingDrawings.Count -eq 0) {
         foreach ($case in $previewCases) {

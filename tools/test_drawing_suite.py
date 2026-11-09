@@ -27,10 +27,12 @@ CASES = [
      "D_LINEAR图层添加端点(0,0)、(30,40)的水平线性标注，标注位置(15,-10)，真实读数30；D_ALIGNED图层添加同两端点的对齐标注，位置(-10,20)，读数50；画圆心(100,0)、半径20的圆，在D_RADIUS图层创建真实半径标注，圆周点(120,0)，读数20；在D_DIAMETER图层创建同圆的真实直径标注，圆周点(100,20)，读数40。"),
     ("hatch", "斜线、颗粒填充及内孔",
      "H_DIAGONAL与H_DOTS两图层分别画完全相同外边界(0,0)、(100,0)、(100,80)、(0,80)，内孔(20,20)、(80,20)、(80,60)、(20,60)的原生填充。分别指定ANSI31与DOTS图案，spacing=5、angle=0。内孔留空，不要用白色实心块遮挡。"),
+    ("concrete", "混凝土箱涵剖面、材料填充和引线关联",
+     "绘制混凝土箱涵剖面测试示例。先standard，再设DIMSCALE=10、DIMTXT=3.5、DIMASZ=2.5。C_OUTER层闭合外轮廓(0,0)-(1200,900)，C_INNER层闭合内孔(150,150)-(1050,750)。C_CONCRETE层使用material=concrete、spacing=30的原生HATCH，外边界和内孔分别对应上述两矩形，空洞不填。C_LEADER层原生leader注明C30混凝土，material=concrete、targetLayer=C_CONCRETE，箭头尖(75,450)位于左侧实墙内，折点(-150,650)、文字位置(-450,650)，字高35、箭头大小20。C_DIM层创建四条真实线性标注：外宽1200放在y=-150；外高900放在x=1400；内宽900放在y=300；内高600放在x=900。保持单色黑线，轮廓粗、材料纹理细，不要黑色实心三角形或矩形。"),
     ("blocks", "块、平移、旋转、缩放",
      "定义块TEST_MARK，内部仅圆心(0,0)半径5的圆；在K_BLOCK图层插入3次：位置(0,0)比例1旋转0度；位置(40,0)比例2旋转90度；位置(80,0)比例0.5旋转180度。"),
     ("annotations", "单行、多行文字、引线、实心区域",
-     "T_TEXT图层单行文字TEST高度3.5位置(0,0)；T_MTEXT图层多行文字第一行说明、第二行复核，高度3.5位置(30,0)；T_LEADER图层用原生leader注释C30混凝土，箭头点(0,40)、折点(20,60)、文字位置(30,60)、字高3.5、箭头大小2；T_TRI图层实心三角形按边界顺序(80,0)、(110,0)、(80,40)；T_QUAD图层实心凸四边形按边界顺序(140,0)、(180,0)、(180,20)、(140,20)。"),
+     "T_TEXT图层单行文字TEST高度3.5位置(0,0)；T_MTEXT图层多行文字第一行说明、第二行复核，高度3.5位置(30,0)；T_LEADER图层用原生leader注释引线测试，箭头点(0,40)、折点(20,60)、文字位置(30,60)、字高3.5、箭头大小2；T_TRI图层实心三角形按边界顺序(80,0)、(110,0)、(80,40)；T_QUAD图层实心凸四边形按边界顺序(140,0)、(180,0)、(180,20)、(140,20)。"),
     ("rings", "圆环及实心圆盘",
      "R_RING图层用donut绘制圆心(0,0)内径20外径40的带宽圆环；R_DISK图层用donut绘制圆心(80,0)内径0外径30的实心圆盘。不能用两个空心圆轮廓替代带宽圆环。"),
     ("bulges", "正向、反向圆弧多段线",
@@ -100,6 +102,22 @@ def verify(case, dxf):
                 sizes=sorted(area(list(p.vertices)) for p in loops)
                 return e.dxf.pattern_name==pattern and near(sizes[0],2400) and near(sizes[1],8000)
             add(pattern+" preserves actual outer area and inner hole", one(layer,"HATCH",correct))
+    elif case == "concrete":
+        def rectangle(layer, corners):
+            return one(layer,"LWPOLYLINE",lambda e:e.closed and len(e)==4 and sorted((round(p[0],4),round(p[1],4)) for p in e)==sorted(corners))
+        add("closed outer section is 1200 x 900 mm",rectangle("C_OUTER",[(0,0),(1200,0),(1200,900),(0,900)]))
+        add("open interior is 900 x 600 mm with 150 mm walls",rectangle("C_INNER",[(150,150),(1050,150),(1050,750),(150,750)]))
+        def concrete_hatch(e):
+            loops=list(e.paths)
+            return e.dxf.pattern_name=="AR-CONC" and len(loops)==2 and all(hasattr(p,"vertices") for p in loops) and sorted(round(area(list(p.vertices)),3) for p in loops)==[540000,1080000]
+        add("concrete is a native patterned material with an empty hole",one("C_CONCRETE","HATCH",concrete_hatch))
+        def material_note(e):
+            tips=[line.vertices[0] for cluster in e.context.leaders for line in cluster.lines if line.vertices]
+            return e.context.mtext is not None and "C30混凝土" in e.context.mtext.default_content and any(xy(t,(75,450)) for t in tips)
+        add("C30 annotation arrow actually lands inside the concrete wall",one("C_LEADER","MULTILEADER",material_note))
+        dims=[e for e in model.query("DIMENSION") if e.dxf.layer=="C_DIM"]
+        add("four dimensions retain actual source sizes",len(dims)==4 and sorted(round(e.get_measurement(),3) for e in dims)==[600,900,900,1200] and all(e.dxf.get("text","") in ("","<>") for e in dims))
+        add("no unrelated black solid placeholders",not list(model.query("SOLID")))
     elif case == "blocks":
         inserts=[e for e in model.query("INSERT") if e.dxf.layer=="K_BLOCK"]
         add("three native block references",len(inserts)==3)
@@ -113,7 +131,7 @@ def verify(case, dxf):
         def leader(e):
             tips=[line.vertices[0] for cluster in e.context.leaders for line in cluster.lines if line.vertices]
             vertices=[v for cluster in e.context.leaders for line in cluster.lines for v in line.vertices]
-            return e.context.mtext is not None and "C30混凝土" in e.context.mtext.default_content and any(xy(t,(0,40)) for t in tips) and any(xy(v,(20,60)) for v in vertices)
+            return e.context.mtext is not None and "引线测试" in e.context.mtext.default_content and any(xy(t,(0,40)) for t in tips) and any(xy(v,(20,60)) for v in vertices)
         add("native leader retains arrow tip bend and Chinese annotation",one("T_LEADER","MULTILEADER",leader))
         for layer, expected in [("T_TRI",600),("T_QUAD",800)]:
             add(layer+" native solid has correct area",one(layer,"SOLID",lambda e:near(area([tuple(e.dxf.get("vtx"+str(i))) for i in [0,1,3,2]]),expected)))

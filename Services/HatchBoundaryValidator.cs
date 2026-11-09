@@ -50,6 +50,16 @@ namespace AutoCAD.AI.Assistant.Services
             }
             return null;
         }
+        internal static bool ContainsMaterial(Dictionary<string, object> command, double[] point)
+        {
+            var outer = Points((object[])command["points"]);
+            if (!Inside(point, outer)) return false;
+            if (command.ContainsKey("holes"))
+                foreach (object[] hole in (object[])command["holes"])
+                    if (Inside(point, Points(hole))) return false;
+            return true;
+        }
+
         private static List<double[]> Points(object[] values)
         {
             var points = new List<double[]>(); foreach (var value in values) points.Add(CadPlanQuality.ReadPoint(value));

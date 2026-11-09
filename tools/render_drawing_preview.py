@@ -4,7 +4,7 @@ import fitz
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = [("annotations", "Text, leader and solid regions"),
+CASES = [("concrete", "Concrete section: material, hollow opening and anchored annotation"),
          ("angular", "Native 45 and 90 degree dimensions"),
          ("rings", "Wide circular ring and filled disk"),
          ("hatch", "Diagonal and particle textures with an inner hole")]
