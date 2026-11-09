@@ -15,7 +15,7 @@ namespace AutoCAD.AI.Assistant.Services
             "layer", "textstyle", "setvar", "standard", "frame", "block", "insert",
             "line", "polyline", "rect", "rectangle", "ngon", "polygon", "circle", "arc",
             "ellipse", "spline", "point", "text", "mtext", "hatch",
-            "dimlinear", "dim", "dimaligned", "dimradius", "dimdiameter"
+            "dimlinear", "dim", "dimaligned", "dimradius", "dimdiameter", "dimangular", "leader", "donut", "solid"
         };
 
         /// <summary>返回 null 表示通过；否则返回可直接展示的错误说明。</summary>
@@ -147,7 +147,62 @@ namespace AutoCAD.AI.Assistant.Services
             if (type == "spline") return CheckPoints(command, "points", 3, "spline 至少需要 3 个点。");
             if (type == "line" || type == "polyline")
             {
-                return CheckPoints(command, "points", 2, "缺少 points 坐标（至少 2 个点）。");
+                var error = CheckPoints(command, "points", 2, "缺少 points 坐标（至少 2 个点）。");
+                if (type == "polyline" && command.ContainsKey("closed") && !(command["closed"] is bool)) return "closed 必须为布尔值。";
+                if (command.ContainsKey("width") && (!IsNumber(command["width"]) || ToNumber(command["width"]) < 0)) return "width 不得小于 0。";
+                if (error != null || type != "polyline" || !command.ContainsKey("bulges")) return error;
+                var bulges = command["bulges"] as object[];
+                var points = (object[])command["points"];
+                if (bulges == null || bulges.Length != points.Length) return "bulges 须与 points 等长，每个值控制从该顶点出发的弧段。";
+                for (var i = 0; i < bulges.Length; i++)
+                {
+                    if (!IsNumber(bulges[i]) || Math.Abs(ToNumber(bulges[i])) > 10) return "bulge 须为 -10 到 10 的有限数字。";
+                    if (i == points.Length - 1 && !(command.ContainsKey("closed") && (bool)command["closed"]) && ToNumber(bulges[i]) != 0)
+                        return "开放多段线最后一个 bulge 必须为 0。";
+                    if (ToNumber(bulges[i]) != 0 && Distance(points[i], points[(i + 1) % points.Length]) < 1e-8) return "圆弧段端点不能重合。";
+                }
+                return null;
+            }
+            if (type == "donut")
+            {
+                var error = Point(command, "center") ?? Numeric(command, "innerDiameter") ?? Positive(command, "outerDiameter");
+                if (error != null) return error;
+                return Number(command, "innerDiameter") >= 0 && Number(command, "innerDiameter") < Number(command, "outerDiameter") ? null : "圆环要求 0 ≤ innerDiameter < outerDiameter。";
+            }
+            if (type == "solid")
+            {
+                var error = CheckPoints(command, "points", 3, "实心区域需要 3 或 4 个沿边界顺序排列的点。");
+                if (error != null) return error;
+                var points = (object[])command["points"];
+                if (points.Length > 4) return "solid 仅支持三角形或凸四边形。";
+                var sign = 0;
+                for (var i = 0; i < points.Length; i++)
+                {
+                    var a = CadPlanQuality.ReadPoint(points[i]); var b = CadPlanQuality.ReadPoint(points[(i + 1) % points.Length]); var c = CadPlanQuality.ReadPoint(points[(i + 2) % points.Length]);
+                    var cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+                    if (Math.Abs(cross) < 1e-8 || (sign != 0 && Math.Sign(cross) != sign)) return "solid 边界不得退化、自交或凹陷。";
+                    sign = Math.Sign(cross);
+                }
+                return null;
+            }
+            if (type == "leader")
+            {
+                var error = CheckPoints(command, "points", 2, "引线 points 至少需要箭头点和折点。") ?? Point(command, "position");
+                if (error != null) return error;
+                var points = (object[])command["points"];
+                if (points.Length > 32) return "单条引线最多支持 32 个顶点。";
+                for (var i = 1; i < points.Length; i++) if (Distance(points[i - 1], points[i]) < 1e-8) return "引线相邻顶点不能重合。";
+                if (Text(command, "content").Length == 0) return "引线缺少 content。";
+                if (command.ContainsKey("arrowSize")) return Positive(command, "arrowSize");
+                return null;
+            }
+            if (type == "dimangular")
+            {
+                var error = Point(command, "center") ?? Point(command, "p1") ?? Point(command, "p2") ?? Point(command, "position");
+                if (error != null) return error;
+                var angle = CadPlanQuality.AngularDegrees(command);
+                if (Double.IsNaN(angle) || angle < .00001 || angle > 179.99999) return "角度标注需两条非零、不共线射线，范围为 0 到 180 度的小角。";
+                return CadPlanQuality.IsInsideAngularSector(command) ? null : "角度标注 position 必须位于两射线之间的小角扇区。";
             }
             if (type == "rect" || type == "rectangle")
             {
@@ -291,6 +346,12 @@ namespace AutoCAD.AI.Assistant.Services
         {
             if (!command.ContainsKey(key) || command[key] == null) return "缺少 " + key + " 坐标。";
             return IsPoint(command[key]) ? null : key + " 坐标格式应为 [x,y]。";
+        }
+
+        private static double Distance(object a, object b)
+        {
+            var x = CadPlanQuality.ReadPoint(a); var y = CadPlanQuality.ReadPoint(b);
+            return Math.Sqrt((x[0] - y[0]) * (x[0] - y[0]) + (x[1] - y[1]) * (x[1] - y[1]));
         }
 
         private static string Positive(Dictionary<string, object> command, string key)

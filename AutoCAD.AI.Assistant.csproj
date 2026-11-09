@@ -91,6 +91,7 @@
     <Compile Include="Services\HatchBoundaryValidator.cs" />
     <Compile Include="Services\DiagnosticsLog.cs" />
     <Compile Include="Services\BackgroundWork.cs" />
+    <Compile Include="Services\StreamingPreview.cs" />
     <Compile Include="Services\CadPreviewSettings.cs" />
     <Compile Include="Services\CadStartupUi.cs" />
     <Compile Include="Views\CadRibbon.cs" />

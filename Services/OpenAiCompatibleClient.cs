@@ -18,6 +18,10 @@ namespace AutoCAD.AI.Assistant.Services
             "纯文字绘图默认毫米；每条可加layer/color/lineweight（纸面mm，不随单位换算）。命令 type：" +
             "layer{name,color,linetype,lineweight}；line{points}；polyline{points,closed,width}；rect{p1,p2}；" +
             "ngon{center,sides,radius}；circle{center,radius}；arc{center,radius,start,end}；ellipse{center,major,ratio}；" +
+            "donut{center,innerDiameter,outerDiameter}（原生带宽圆环，0≤内径<外径）；solid{points}（按边界顺序3点三角形或4点凸四边形的二维实心区域）；" +
+            "leader{points,position,height,content,arrowSize}（原生多重引线，points依次为箭头尖、折点，position为文字位置，不能用几条散线冒充）；" +
+            "dimangular{center,p1,p2,position,value}（真实原生小角标注，center为顶点、p1/p2为射线上点，position在小角扇区内；value始终为度，不随cm/m换算，角度须0<值<180）；" +
+            "polyline可带bulges数组，与points等长；每值为该顶点至下一顶点圆弧的tan(扫角/4)，正值逆时针，负值顺时针，0为直线，半圆为±1；开放折线末值为0，弧不能用很多短线代替。" +
             "spline{points}；point{position}；text{position,height,content}；mtext{position,height,width,content}；" +
             "hatch{points,holes,material,spacing,pattern,scale,angle}（holes为内孔多边形数组。材料优先material:riprap块石/gravel碎石/sand砂/earth土/clay粘土/concrete混凝土，自动按当前DIMSCALE控制纸面疏密；spacing可选，指定源坐标单位下的纹理大小；不要用几块孤立多边形代替整个石材区域填充。材料填充与文字、引线分开，保留层间边界与内孔）；dimlinear{p1,p2,position,rotation}；dimaligned{p1,p2,position}；" +
             "dimradius{center,point}；dimdiameter{center,point}；block{name,commands}；insert{name,position,rotation,scale}；setvar{name,value}；" +
@@ -33,6 +37,11 @@ namespace AutoCAD.AI.Assistant.Services
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024 };
         private static readonly object CapabilitySync = new object();
         private static readonly HashSet<string> NoTemperature = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> NoStreaming = new HashSet<string>(StringComparer.Ordinal);
+        private sealed class ModelResponseException : InvalidOperationException
+        { public ModelResponseException(string message) : base(message) { } }
+        private static bool SupportsStreaming(string url, string model)
+        { lock (CapabilitySync) return !NoStreaming.Contains(url + "\n" + model); }
 
         private static bool IncludeTemperature(string url, string model)
         {
@@ -87,19 +96,19 @@ namespace AutoCAD.AI.Assistant.Services
                     : await Task.Run(() => BuildMessages(model, history, drawingContext, imagePath, token, detailedImages), token).ConfigureAwait(false);
                 var timeoutSeconds = imagePath != null ? 240 : 120;
                 var started = DateTime.Now;
+                if (progress != null) progress(imagePath == null ? "正在生成…" : "正在读取高清图纸并生成几何计划…");
 
-                if (onDelta != null && imagePath == null)
+                if (onDelta != null && imagePath == null && SupportsStreaming(url, model.ModelId))
                 {
                     var streamed = await TryStreamAsync(url, key, model.ModelId, messages, onDelta, timeoutSeconds, token).ConfigureAwait(false);
                     if (streamed != null)
                     {
-                        DiagnosticsLog.Write("请求完成 流式 状态=200 " + Elapsed(started) + "ms");
+                        DiagnosticsLog.Write("请求完成 文本通道 状态=200 " + Elapsed(started) + "ms");
                         return await ValidateAndRepairAsync(streamed, url, key, model.ModelId, messages, imagePath != null, token, progress).ConfigureAwait(false);
                     }
                 }
 
                 var body = new ChatRequest { model = model.ModelId, messages = messages, temperature = 0.2, stream = false };
-                if (progress != null) progress(imagePath == null ? "正在生成…" : "正在读取高清图纸并生成几何计划…");
                 var result = await PostWithRetryAsync(url, key, body, timeoutSeconds, token).ConfigureAwait(false);
                 DiagnosticsLog.Write("请求完成 状态=" + result.status + " " + Elapsed(started) + "ms 模式=" + (imagePath != null ? "图片" : "文本"));
 
@@ -189,16 +198,16 @@ namespace AutoCAD.AI.Assistant.Services
             }
         }
 
-        /// <summary>流式请求；失败或服务端不支持流式时返回 null，由调用方回退非流式。</summary>
+        /// <summary>Accept SSE or JSON from this same response; never retry a partial answer.</summary>
         private async Task<string> TryStreamAsync(string url, string key, string modelId, List<ChatMessage> messages, Action<string> onDelta, int timeoutSeconds, CancellationToken token)
         {
+            var emitted = false;
             using (var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 cancellation.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
                 try
                 {
-                    for (var compatibilityAttempt = 0; compatibilityAttempt < 2; compatibilityAttempt++)
-                    {
+                    for (var attempt = 0; attempt < 2; attempt++)
                     using (var request = new HttpRequestMessage(HttpMethod.Post, url))
                     {
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
@@ -207,13 +216,30 @@ namespace AutoCAD.AI.Assistant.Services
                         request.Content = new StringContent(SerializeRequest(url, body, out temperatureSent), Encoding.UTF8, "application/json");
                         using (var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation.Token).ConfigureAwait(false))
                         {
-                            if (!IsSuccess((int)response.StatusCode))
+                            var status = (int)response.StatusCode;
+                            if (!IsSuccess(status))
                             {
                                 var error = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                if (compatibilityAttempt == 0 && LearnTemperatureRejection(url, modelId, (int)response.StatusCode, error, temperatureSent)) continue;
+                                if (attempt == 0 && LearnTemperatureRejection(url, modelId, status, error, temperatureSent)) continue;
+                                var detail = ErrorMessage(error);
+                                var lower = detail.ToLowerInvariant();
+                                if ((status == 400 || status == 406 || status == 415 || status == 422 || status == 501)
+                                    && lower.Contains("stream") && (lower.Contains("not support") || lower.Contains("unsupported")))
+                                {
+                                    lock (CapabilitySync)
+                                    {
+                                        if (NoStreaming.Count >= 128) NoStreaming.Clear();
+                                        NoStreaming.Add(url + "\n" + modelId);
+                                    }
+                                    DiagnosticsLog.Write("模型明确不支持流式：本次改为普通请求，后续同一模型直接使用普通请求。");
+                                    return null;
+                                }
+                                if (status != 429 && status < 500)
+                                    throw new ModelResponseException("模型请求失败（" + status + "）：" + detail);
                                 return null;
                             }
                             var builder = new StringBuilder();
+                            var complete = false; var sawData = false;
                             using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                             using (cancellation.Token.Register(() => stream.Dispose()))
                             using (var reader = new System.IO.StreamReader(stream))
@@ -222,53 +248,70 @@ namespace AutoCAD.AI.Assistant.Services
                                 {
                                     var line = await reader.ReadLineAsync().ConfigureAwait(false);
                                     if (line == null) break;
-                                    if (line.Length == 0 || !line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
-                                    var data = line.Substring(5).Trim();
-                                    if (data == "[DONE]") break;
-                                    var delta = ExtractDelta(data);
-                                    if (string.IsNullOrEmpty(delta)) continue;
-                                    builder.Append(delta);
-                                    onDelta(delta);
+                                    var trimmed = line.TrimStart();
+                                    // Some compatible services ignore stream=true and return a full JSON reply.
+                                    if (!sawData && (trimmed.StartsWith("{", StringComparison.Ordinal) || trimmed.StartsWith("[", StringComparison.Ordinal)))
+                                    {
+                                        var json = line + "\n" + await reader.ReadToEndAsync().ConfigureAwait(false);
+                                        string answer;
+                                        try { answer = ExtractContent(json); }
+                                        catch (Exception ex) { throw new ModelResponseException(ex.Message); }
+                                        cancellation.Token.ThrowIfCancellationRequested();
+                                        emitted = true; onDelta(answer);
+                                        DiagnosticsLog.Write("流式请求收到普通JSON，直接使用本次结果，未重复请求。");
+                                        return answer;
+                                    }
+                                    if (!trimmed.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
+                                    var data = trimmed.Substring(5).Trim();
+                                    if (data.Length == 0) continue;
+                                    sawData = true;
+                                    if (data == "[DONE]") { complete = true; break; }
+                                    string finish;
+                                    var delta = ExtractDelta(data, out finish);
+                                    if (finish == "length") throw new ModelResponseException("模型输出被截断，未执行。请缩小绘图范围或提高服务输出上限。");
+                                    if (!String.IsNullOrEmpty(finish) && finish != "stop") throw new ModelResponseException("模型未正常完成输出（" + finish + "），未执行。");
+                                    if (finish == "stop") complete = true;
+                                    if (String.IsNullOrEmpty(delta)) continue;
+                                    if (builder.Length + delta.Length > 8 * 1024 * 1024)
+                                        throw new ModelResponseException("模型输出超过本地长度上限，未执行。");
+                                    builder.Append(delta); emitted = true; onDelta(delta);
                                 }
                             }
+                            if (sawData && !complete) throw new ModelResponseException("流式连接提前结束，未执行不完整的绘图计划。请重新发送。");
                             var text = builder.ToString().Trim();
+                            if (text.Length == 0 && sawData) throw new ModelResponseException("模型返回了空内容。");
                             return text.Length == 0 ? null : text;
                         }
                     }
-                    }
                     return null;
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
+                catch (OperationCanceledException) { throw; }
+                catch (ModelResponseException) { throw; }
                 catch (Exception ex)
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
-                    DiagnosticsLog.Write("流式失败，回退非流式：" + ex.Message);
+                    if (emitted) throw new ModelResponseException("流式输出中断，未执行，也未自动重复请求：" + ex.Message);
+                    DiagnosticsLog.Write("流式连接失败，回退非流式：" + ex.Message);
                     return null;
                 }
             }
         }
 
-        private string ExtractDelta(string json)
+        private string ExtractDelta(string json, out string finish)
         {
-            try
-            {
-                var map = _serializer.DeserializeObject(json) as Dictionary<string, object>;
-                if (map == null || !map.ContainsKey("choices")) return null;
-                var choices = map["choices"] as object[];
-                if (choices == null || choices.Length == 0) return null;
-                var choice = choices[0] as Dictionary<string, object>;
-                if (choice == null || !choice.ContainsKey("delta")) return null;
-                var delta = choice["delta"] as Dictionary<string, object>;
-                if (delta == null || !delta.ContainsKey("content") || delta["content"] == null) return null;
-                return Convert.ToString(delta["content"]);
-            }
-            catch
-            {
-                return null;
-            }
+            finish = null;
+            Dictionary<string, object> map;
+            try { map = _serializer.DeserializeObject(json) as Dictionary<string, object>; }
+            catch { throw new ModelResponseException("流式数据格式错误，未执行。"); }
+            if (map == null) throw new ModelResponseException("流式数据格式错误，未执行。");
+            if (map.ContainsKey("error")) throw new ModelResponseException("模型流式请求失败：" + ErrorMessage(json));
+            var choices = map.ContainsKey("choices") ? map["choices"] as object[] : null;
+            if (choices == null || choices.Length == 0) return null;
+            var choice = choices[0] as Dictionary<string, object>;
+            if (choice == null) return null;
+            if (choice.ContainsKey("finish_reason") && choice["finish_reason"] != null) finish = Convert.ToString(choice["finish_reason"]);
+            var delta = choice.ContainsKey("delta") ? choice["delta"] as Dictionary<string, object> : null;
+            return delta != null && delta.ContainsKey("content") && delta["content"] != null ? Convert.ToString(delta["content"]) : null;
         }
 
         private static long Elapsed(DateTime started)

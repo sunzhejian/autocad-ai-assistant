@@ -3,6 +3,7 @@ using System.IO;
 using System.Globalization;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
 using AcApplication = Autodesk.AutoCAD.ApplicationServices.Application;
 
 [assembly: CommandClass(typeof(NativeDrawingExport))]
@@ -17,7 +18,25 @@ public sealed class NativeDrawingExport
         try
         {
             db.UpdateExt(true);
-            var min = db.Extmin; var max = db.Extmax;
+            var bounds = new Extents3d(db.Extmin, db.Extmax);
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var blocks = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                var model = (BlockTableRecord)tr.GetObject(blocks[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                foreach (ObjectId id in model)
+                {
+                    var polyline = tr.GetObject(id, OpenMode.ForRead) as Polyline;
+                    if (polyline == null) continue;
+                    var widthPadding = 0.0;
+                    for (var i = 0; i < polyline.NumberOfVertices; i++)
+                        widthPadding = Math.Max(widthPadding, Math.Max(polyline.GetStartWidthAt(i), polyline.GetEndWidthAt(i)) / 2);
+                    if (widthPadding <= 0) continue;
+                    var box = polyline.GeometricExtents;
+                    var padding = new Vector3d(widthPadding, widthPadding, 0);
+                    bounds.AddExtents(new Extents3d(box.MinPoint - padding, box.MaxPoint + padding));
+                }
+            }
+            var min = bounds.MinPoint; var max = bounds.MaxPoint;
             var width = max.X - min.X; var height = max.Y - min.Y;
             if (width <= 0 || height <= 0) throw new InvalidOperationException("Drawing has no finite 2D bounds.");
             var ratio = Math.Max(width / 380, height / 257);

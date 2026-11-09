@@ -24,5 +24,5 @@ Copy-Item -LiteralPath $env:CADAI_LARGE_REPORT -Destination (Join-Path $output (
 $report = Get-Content -LiteralPath $env:CADAI_LARGE_REPORT -Raw -Encoding UTF8 | ConvertFrom-Json
 if (@($report | Where-Object {$_.error}).Count -gt 0) { throw 'Large drawing probe failed; inspect its report' }
 $checks = @($report | Where-Object {$null -ne $_.passed})
-if (-not $Baseline -and ($checks.Count -ne 5 -or @($checks | Where-Object {-not $_.passed}).Count -gt 0)) { throw 'Large drawing checks failed' }
+if (-not $Baseline -and ($checks.Count -ne 7 -or @($checks | Where-Object {-not $_.passed}).Count -gt 0)) { throw 'Large drawing checks failed' }
 $report | ConvertTo-Json -Depth 4

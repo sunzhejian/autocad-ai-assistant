@@ -17,3 +17,4 @@ models.json.*
 *.p12
 *.key
 releases/
+output/

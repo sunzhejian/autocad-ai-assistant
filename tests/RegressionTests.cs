@@ -44,6 +44,7 @@ internal static class RegressionTests
             TestPreparedPlan();
             TestImageLinetypes();
             TestDimensionFormatVariables();
+            TestNewDrawingFeatures();
             TestMaterials();
             TestHatchBoundaries();
             foreach (var fixture in Directory.GetFiles("tests/fixtures", "*.json"))
@@ -57,6 +58,7 @@ internal static class RegressionTests
             TestPdfSnapshot(folder);
             TestClient().GetAwaiter().GetResult();
             TestAutoCompatibility().GetAwaiter().GetResult();
+            TestRuntimeBehavior().GetAwaiter().GetResult();
             Console.WriteLine("TOTAL " + Passed + " passed"); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex); return 1; }
@@ -107,6 +109,41 @@ internal static class RegressionTests
         File.WriteAllText(backup, Json.Serialize(values).Replace("\"STARTUP\":0", "\"STARTUP\":0.5"));
         try { StartupSettingsBackup.Read(backup); Check(false, "startup restore rejects fractional values"); }
         catch (InvalidDataException) { Check(true, "startup restore rejects fractional values"); }
+    }
+
+    private static void TestNewDrawingFeatures()
+    {
+        var angular = "{\"type\":\"dimangular\",\"center\":[0,0],\"p1\":[10,0],\"p2\":[0,10],\"position\":[5,5],\"value\":90}";
+        Check(CadPlanValidator.Validate(Plan(angular)) == null, "native angular dimension accepts a real 90 degree sector");
+        Check(CadPlanValidator.Validate(Plan(angular.Replace("\"value\":90", "\"value\":60"))) != null, "angular dimension rejects a falsely stated angle");
+        Check(CadPlanValidator.Validate(Plan(angular.Replace("[5,5]", "[-5,-5]"))) != null, "angular dimension rejects a reflex sector position");
+        Check(CadPlanValidator.Validate(Plan(angular.Replace("[0,10]", "[20,0]"))) != null, "angular dimension rejects collinear rays");
+        var source = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[" + angular + "]}";
+        Check(CadPlanValidator.Validate(source) == null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(source)) == null,
+            "angle values remain degrees across source length normalization");
+        Check(CadPlanValidator.Validate(Plan(angular.Replace("\"value\":90", "\"value\":90,\"text\":\"60°\""))) != null, "angle text cannot conceal the native measurement");
+        var ring = "{\"type\":\"donut\",\"center\":[0,0],\"innerDiameter\":6,\"outerDiameter\":10}";
+        Check(CadPlanValidator.Validate(Plan(ring)) == null && CadPlanValidator.Validate(Plan(ring.Replace(":6", ":0"))) == null, "donut supports hollow rings and filled disks");
+        Check(CadPlanValidator.Validate(Plan(ring.Replace(":6", ":10"))) != null && CadPlanValidator.Validate(Plan(ring.Replace(":6", ":-1"))) != null,
+            "donut rejects reversed and negative inner diameters");
+        var sourceRing = CadPlanNormalizer.Normalize("{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[" + ring + "]}");
+        var c = (Dictionary<string, object>)((object[])((Dictionary<string, object>)Json.DeserializeObject(sourceRing))["commands"])[0];
+        Check(CadPlanQuality.Number(c["innerDiameter"]) == 60 && CadPlanQuality.Number(c["outerDiameter"]) == 100, "donut diameters convert to millimeters once");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"solid\",\"points\":[[0,0],[10,0],[10,5],[0,5]]}")) == null, "solid accepts perimeter-ordered convex vertices");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"solid\",\"points\":[[0,0],[10,5],[0,5],[10,0]]}")) != null, "solid rejects crossed quadrilateral vertices");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"solid\",\"points\":[[0,0],[5,0],[10,0]]}")) != null, "solid rejects zero area triangles");
+        var curve = "{\"type\":\"polyline\",\"points\":[[0,0],[10,0]],\"bulges\":[1,0]}";
+        Check(CadPlanValidator.Validate(Plan(curve)) == null, "polyline supports a native semicircular segment");
+        Check(CadPlanValidator.Validate(Plan(curve.Replace("[1,0]", "[1]"))) != null, "polyline rejects mismatched bulge count");
+        Check(CadPlanValidator.Validate(Plan(curve.Replace("[1,0]", "[1,1]"))) != null, "open polyline cannot hide an unused last arc");
+        Check(CadPlanValidator.Validate(Plan(curve.Replace("[1,0]", "[1e99,0]"))) != null, "polyline rejects extreme bulges");
+        Check(CadPlanValidator.Validate(Plan(curve.Replace("[10,0]", "[0,0]"))) != null, "polyline rejects coincident arc endpoints");
+        var leader = "{\"type\":\"leader\",\"points\":[[0,0],[10,10]],\"position\":[20,10],\"height\":3.5,\"content\":\"C30混凝土\"}";
+        Check(CadPlanValidator.Validate(Plan(leader)) == null, "leader accepts a tip bend and annotation");
+        Check(CadPlanValidator.Validate(Plan(leader.Replace("C30混凝土", ""))) != null, "leader rejects missing annotation text");
+        Check(CadPlanValidator.Validate(Plan(leader.Replace("[10,10]", "[0,0]"))) != null, "leader rejects zero length segments");
+        Check(CadPlanValidator.Validate(Plan(curve.Replace("\"type\":\"polyline\"", "\"type\":\"polyline\",\"closed\":\"true\""))) != null, "polyline rejects a nonboolean closure flag");
+        Check(CadPlanValidator.Validate(Plan(curve.Replace("\"type\":\"polyline\"", "\"type\":\"polyline\",\"width\":-1"))) != null, "polyline rejects negative widths");
     }
 
     private static void TestDimensionFormatVariables()
@@ -391,6 +428,70 @@ internal static class RegressionTests
     { return ((Dictionary<string, object>)Json.DeserializeObject(request)).ContainsKey("temperature"); }
     private static string StreamReply(string content)
     { return "data: " + Json.Serialize(new { choices = new[] { new { delta = new { content = content } } } }) + "\n\ndata: [DONE]\n\n"; }
+    private static async Task TestRuntimeBehavior()
+    {
+        Func<string, string> reply = value => Json.Serialize(new { choices = new[] { new { message = new { content = value }, finish_reason = "stop" } } });
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, reply("JSON_OK"));
+            var delta = new StringBuilder();
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null, value => delta.Append(value));
+            Check(answer == "JSON_OK" && delta.ToString() == answer && s.Requests.Count == 1,
+                "a JSON reply to a streaming request is consumed once without a second provider call");
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, reply("PRETTY_JSON").Replace("{", "{\n"));
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null, value => { });
+            Check(answer == "PRETTY_JSON" && s.Requests.Count == 1, "multiline JSON is accepted without a fallback request");
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(401, "{\"error\":{\"message\":\"invalid credential\"}}");
+            try { await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null, value => { }); Check(false, "authentication failure"); }
+            catch (InvalidOperationException) { Check(s.Requests.Count == 1, "stream authentication errors do not repeat an identical failing request"); }
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => s.Requests[i - 1].Contains("\"stream\":true")
+                ? Tuple.Create(400, "{\"error\":{\"message\":\"stream is not supported\"}}") : Tuple.Create(200, reply("NO_STREAM"));
+            var client = new OpenAiCompatibleClient(); var model = Model(s);
+            await client.CompleteAsync(model, History(), "", null, value => { });
+            await client.CompleteAsync(model, History(), "", null, value => { });
+            Check(s.Requests.Count == 3, "explicit stream rejection is remembered for the same endpoint and model");
+            model.ModelId = "another-stream-model";
+            await client.CompleteAsync(model, History(), "", null, value => { });
+            Check(s.Requests.Count == 5, "stream compatibility is scoped to its model");
+        }
+        var plan = Plan("{\"type\":\"circle\",\"center\":[0,0],\"radius\":5}");
+        Func<string, string> eventLine = content => "data: " + Json.Serialize(new { choices = new[] { new { delta = new { content = content } } } }) + "\n\n";
+        var truncated = "data: " + Json.Serialize(new { choices = new[] { new { delta = new { content = "```cad\n" + plan + "\n```" }, finish_reason = "length" } } }) + "\n\ndata: [DONE]\n\n";
+        foreach (var body in new[] { truncated, truncated.Replace("length", "content_filter"), eventLine("partial"), eventLine("partial") + "data: {\"error\":{\"message\":\"upstream failed\"}}\n\n", "data: invalid-json\n\n" })
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, body);
+            try { await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null, value => { }); Check(false, "incomplete stream"); }
+            catch (InvalidOperationException) { Check(s.Requests.Count == 1, "truncated interrupted or invalid streams never execute or silently restart"); }
+        }
+        using (var s = new Server())
+        {
+            var stop = "data: " + Json.Serialize(new { choices = new[] { new { delta = new { }, finish_reason = "stop" } } }) + "\n\n";
+            s.Response = i => Tuple.Create(200, eventLine("FINISHED") + stop);
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null, value => { });
+            Check(answer == "FINISHED" && s.Requests.Count == 1, "finish_reason stop completes a stream without an extra DONE marker");
+        }
+        var preview = new StreamingPreview();
+        preview.Append("说明`"); preview.Append("``cad\n");
+        Check(preview.Take() == "说明\n（正在生成绘图指令…）", "preview recognizes a code fence split across deltas");
+        var timer = Stopwatch.StartNew();
+        for (var i = 0; i < 100000; i++) preview.Append("ignored plan data");
+        Check(preview.BufferedCharacters < 100 && preview.Take() == null && timer.ElapsedMilliseconds < 1000,
+            "100000 plan chunks create no more preview work after the fence");
+        preview = new StreamingPreview(); preview.Append(new String('x', 100000));
+        Check(preview.BufferedCharacters <= 8000 && preview.Take().Length < 8100 && preview.Take() == null,
+            "stream preview is bounded and emits each changed snapshot only once");
+    }
+
     private static async Task TestAutoCompatibility()
     {
         const string unsupported = "{\"error\":{\"message\":\"model does not support parameter(s): temperature; please remove them from your request\"}}";

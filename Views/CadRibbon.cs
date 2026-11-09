@@ -28,8 +28,9 @@ namespace AutoCAD.AI.Assistant.Views
                 tab = new RibbonTab { Id = TabId, Title = "AI 制图" };
                 AddPanel(tab, "AI 助手", "AI 助手 / 图纸复刻", "AI", "执行本地计划", "AIPLAN");
                 AddPanel(tab, "绘图与填充", "直线", "_.LINE", "多段线", "_.PLINE", "矩形", "_.RECTANG", "圆", "_.CIRCLE", "图案填充", "_.HATCH", "编辑填充", "_.HATCHEDIT");
+                AddPanel(tab, "曲线与注释", "圆弧", "_.ARC", "椭圆", "_.ELLIPSE", "样条曲线", "_.SPLINE", "圆环", "_.DONUT", "实心区域", "_.SOLID", "多重引线", "_.MLEADER");
                 AddPanel(tab, "修改", "移动", "_.MOVE", "复制", "_.COPY", "偏移", "_.OFFSET", "修剪", "_.TRIM", "圆角", "_.FILLET", "镜像", "_.MIRROR");
-                AddPanel(tab, "标注与图层", "线性标注", "_.DIMLINEAR", "对齐标注", "_.DIMALIGNED", "半径标注", "_.DIMRADIUS", "图层管理", "_.LAYER", "对象特性", "_.PROPERTIES", "快速选择", "_.QSELECT");
+                AddPanel(tab, "标注与图层", "线性标注", "_.DIMLINEAR", "对齐标注", "_.DIMALIGNED", "半径标注", "_.DIMRADIUS", "角度标注", "_.DIMANGULAR", "直径标注", "_.DIMDIAMETER", "图层管理", "_.LAYER", "对象特性", "_.PROPERTIES", "快速选择", "_.QSELECT");
                 AddPanel(tab, "视图与性能", "显示全图", "_.ZOOM _E", "平移", "_.PAN", "减少实时预览", "AIPERF", "恢复实时预览", "AIPERFRESTORE", "恢复完整界面", "AIUI", "关闭启动整理", "AIUIOFF", "恢复启动偏好", "AIUIRESTORE");
                 ribbon.Tabs.Add(tab);
             }

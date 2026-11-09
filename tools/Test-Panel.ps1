@@ -1,4 +1,4 @@
-param([string]$AutoCADPath = 'D:\AutoCAD 2024')
+param([string]$AutoCADPath = 'D:\AutoCAD 2024', [string]$Metadata)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $output = Join-Path $root 'artifacts\ui'
@@ -6,7 +6,7 @@ $scratch = Join-Path $env:TEMP ('cadai-ui-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $scratch,$output -Force | Out-Null
 $env:CADAI_UI_OUTPUT = Join-Path $scratch 'ui-result'
 New-Item -ItemType Directory -Path $env:CADAI_UI_OUTPUT -Force | Out-Null
-$env:CADAI_UI_METADATA = Join-Path $root 'artifacts\pdf-native\source.json'
+$env:CADAI_UI_METADATA = if ($Metadata) { (Resolve-Path -LiteralPath $Metadata).Path } else { Join-Path $root 'artifacts\pdf-native\source.json' }
 $env:CADAI_PLUGIN_DLL = Join-Path $scratch 'AutoCAD.AI.Assistant.dll'
 $env:CADAI_DATA_DIR = Join-Path $scratch 'plugin-data'
 Copy-Item -LiteralPath (Join-Path $root 'bin\Release\AutoCAD.AI.Assistant.dll') -Destination $env:CADAI_PLUGIN_DLL

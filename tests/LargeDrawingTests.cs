@@ -40,6 +40,32 @@ public sealed class LargeDrawingTests
             var executor = assembly.GetType("AutoCAD.AI.Assistant.Services.CadDrawingExecutor", true);
             var contextType = assembly.GetType("AutoCAD.AI.Assistant.Services.CadDrawingContext");
             var baseline = contextType == null;
+            var refresh = assembly.GetType("AutoCAD.AI.Assistant.Services.CadViewRefresh");
+            if (refresh != null && refresh.GetMethod("Refresh").GetParameters().Length >= 4)
+            {
+                View(0, 0);
+                Execute(executor, "{\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":1}]}");
+                using (var first = document.Editor.GetCurrentView())
+                    Check(first.Height < 3, "first small drawing is framed visibly in an empty document");
+                using (var cleanup = db.TransactionManager.StartTransaction())
+                {
+                    var blocks = (BlockTable)cleanup.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    var model = (BlockTableRecord)cleanup.GetObject(blocks[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                    foreach (ObjectId id in model) cleanup.GetObject(id, OpenMode.ForWrite).Erase();
+                    cleanup.Commit();
+                }
+                View(0, 0);
+                Execute(executor, "{\"commands\":[{\"type\":\"donut\",\"center\":[0,0],\"innerDiameter\":20,\"outerDiameter\":40}]}");
+                using (var ring = document.Editor.GetCurrentView())
+                    Check(ring.Height >= 40 && ring.Width >= 40, "first wide circular ring is framed without clipping its actual outer radius");
+                using (var cleanup = db.TransactionManager.StartTransaction())
+                {
+                    var blocks = (BlockTable)cleanup.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    var model = (BlockTableRecord)cleanup.GetObject(blocks[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                    foreach (ObjectId id in model) cleanup.GetObject(id, OpenMode.ForWrite).Erase();
+                    cleanup.Commit();
+                }
+            }
             using (var tr = db.TransactionManager.StartTransaction())
             {
                 var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);

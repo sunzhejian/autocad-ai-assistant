@@ -67,9 +67,14 @@ internal static class ModelBenchmark
             history.Add(chat);
             var clientType = assembly.GetType("AutoCAD.AI.Assistant.Services.OpenAiCompatibleClient", true);
             var client = Activator.CreateInstance(clientType, true);
-            var method = clientType.GetMethods().Single(m => m.Name == "CompleteAsync" && m.GetParameters().Length == 4);
+            var streaming = Environment.GetEnvironmentVariable("CADAI_BENCH_STREAM") == "1";
+            var method = clientType.GetMethods().Single(m => m.Name == "CompleteAsync" && m.GetParameters().Length == (streaming ? 5 : 4));
             var image = args[1] == "-" ? null : Path.GetFullPath(args[1]);
-            var answer = ((Task<string>)method.Invoke(client, new[] { model, history, "", image })).GetAwaiter().GetResult();
+            var deltaCharacters = 0;
+            Action<string> delta = value => deltaCharacters += value.Length;
+            var call = streaming ? new object[] { model, history, "", image, delta } : new object[] { model, history, "", image };
+            var answer = ((Task<string>)method.Invoke(client, call)).GetAwaiter().GetResult();
+            report["stream_requested"] = streaming; report["stream_callback_characters"] = deltaCharacters;
             report["answer"] = answer;
             var match = Regex.Match(answer, @"```(?:cad|json)\s*\r?\n([\s\S]*?)```", RegexOptions.IgnoreCase);
             var plan = match.Success ? match.Groups[1].Value.Trim() : answer.Trim().StartsWith("{") ? answer.Trim() : null;

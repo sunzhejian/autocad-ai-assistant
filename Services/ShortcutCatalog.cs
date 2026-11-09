@@ -35,7 +35,7 @@ namespace AutoCAD.AI.Assistant.Services
             { "ERASE", "删除" }, { "MATCHPROP", "特性匹配" }, { "ROTATE", "旋转" }, { "SCALE", "缩放" },
             { "MIRROR", "镜像" }, { "ARRAY", "阵列" }, { "FILLET", "圆角" }, { "CHAMFER", "倒角" },
             { "HATCH", "图案填充" }, { "GRADIENT", "渐变填充" }, { "SPLINE", "样条曲线" }, { "ELLIPSE", "椭圆" },
-            { "POLYGON", "正多边形" }, { "POINT", "点" }, { "DIVIDE", "定数等分" }, { "MEASURE", "定距等分" },
+            { "POLYGON", "正多边形" }, { "POINT", "点" }, { "DIVIDE", "定数等分" }, { "MEASURE", "定距等分" }, { "DONUT", "圆环" }, { "SOLID", "实心区域" },
             { "STRETCH", "拉伸" }, { "LENGTHEN", "拉长" }, { "BREAK", "打断" }, { "JOIN", "合并" },
             { "EXPLODE", "分解" }, { "BLOCK", "创建块" }, { "INSERT", "插入块" }, { "WBLOCK", "写块" },
             { "BEDIT", "块编辑" }, { "XLINE", "构造线" }, { "RAY", "射线" }, { "MLINE", "多线" },

@@ -51,6 +51,11 @@ namespace AutoCAD.AI.Assistant.Services
                     {
                         dimension.RecomputeDimensionBlock(true);
                         var actual = dimension.Measurement;
+                        if (dimension is Point3AngularDimension)
+                        {
+                            record["native_measurement_radians"] = actual;
+                            actual *= 180 / Math.PI; record["measurement_unit"] = "deg";
+                        }
                         if (Double.IsNaN(actual) || Double.IsInfinity(actual) || actual <= 0)
                             throw new InvalidOperationException("原生标注测量失败：第 " + pair.Value + " 条。");
                         record["measurement"] = actual; record["unit_factor"] = dimension.Dimlfac;

@@ -423,18 +423,16 @@ namespace AutoCAD.AI.Assistant.Views
             var history = _conversation.ToList();
             var assistantItem = new ChatItem { Role = model.Title, Content = string.Empty };
             AddMessage(assistantItem);
-            var buffer = new System.Text.StringBuilder();
-            var gate = new object();
+            var preview = new StreamingPreview();
             var streaming = true;
-            var update = new Action(delegate
+            var previewTimer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, Dispatcher);
+            previewTimer.Interval = TimeSpan.FromMilliseconds(100);
+            previewTimer.Tick += delegate
             {
                 if (!streaming) return;
-                string raw;
-                lock (gate) raw = buffer.ToString();
-                var fence = raw.IndexOf("```", StringComparison.Ordinal);
-                if (fence >= 0) raw = raw.Substring(0, fence).TrimEnd() + "\n（正在生成绘图指令…）";
-                assistantItem.Content = raw;
-            });
+                var content = preview.Take();
+                if (content != null) assistantItem.Content = content;
+            };
 
             try
             {
@@ -448,13 +446,10 @@ namespace AutoCAD.AI.Assistant.Views
                 }
 
                 Action<string> onDelta = null;
-                if (StreamingEnabled)
+                if (StreamingEnabled && imagePath == null)
                 {
-                    onDelta = delegate(string delta)
-                    {
-                        lock (gate) buffer.Append(delta);
-                        Dispatcher.BeginInvoke(update);
-                    };
+                    onDelta = preview.Append;
+                    previewTimer.Start();
                 }
                 if (imagePath != null) StatusText.Text = "正在增强图纸清晰度并识别，请稍候…";
                 string cacheKey = null;
@@ -526,12 +521,14 @@ namespace AutoCAD.AI.Assistant.Views
                 }
                 DiagnosticsLog.Error("对话", ex);
                 streaming = false;
-                assistantItem.Role = "请求失败";
+                assistantItem.Role = ex is OperationCanceledException
+                    ? (cancellation.IsCancellationRequested ? "已取消" : "请求超时") : "请求失败";
                 assistantItem.Content = message;
-                StatusText.Text = "请检查模型地址、密钥和网络连接。";
+                StatusText.Text = message;
             }
             finally
             {
+                previewTimer.Stop();
                 revision.Dispose();
                 streaming = false;
                 _requestCancellation.Dispose();

@@ -36,7 +36,7 @@ namespace AutoCAD.AI.Assistant.Services
                 var points = new List<object>();
                 foreach (var field in new[] { "p1", "p2", "center", "position" }) if (c.ContainsKey(field)) points.Add(c[field]);
                 if (c.ContainsKey("points")) points.AddRange((object[])c["points"]);
-                var radius = c.ContainsKey("radius") ? Number(c["radius"]) : 0;
+                var radius = c.ContainsKey("radius") ? Number(c["radius"]) : type == "donut" ? Number(c["outerDiameter"]) / 2 : 0;
                 foreach (var point in points)
                 {
                     var p = ReadPoint(point);
@@ -69,10 +69,12 @@ namespace AutoCAD.AI.Assistant.Services
                 var position = prefix + (i + 1);
                 if (type == "block") { CheckDimensions((object[])c["commands"], factor, errors, position + "."); continue; }
                 if (!type.StartsWith("dim", StringComparison.Ordinal)) continue;
+                var angular = type == "dimangular";
                 var a = ReadPoint(c[type == "dimradius" || type == "dimdiameter" ? "center" : "p1"]);
                 var b = ReadPoint(c[type == "dimradius" || type == "dimdiameter" ? "point" : "p2"]);
                 var dx = b[0] - a[0]; var dy = b[1] - a[1];
                 var length = Math.Sqrt(dx * dx + dy * dy);
+                if (angular) length = AngularDegrees(c);
                 if (type == "dimdiameter") length *= 2;
                 if (type == "dimlinear" || type == "dim")
                 {
@@ -82,7 +84,7 @@ namespace AutoCAD.AI.Assistant.Services
                 if (length < 1e-7) { errors.Add("第 " + position + " 条：标注测量长度为零。"); continue; }
                 if (c.ContainsKey("value"))
                 {
-                    var expected = Number(c["value"]) * factor;
+                    var expected = Number(c["value"]) * (angular ? 1 : factor);
                     if (expected <= 0 || Math.Abs(length - expected) > Math.Max(0.01, expected * 0.00001))
                         errors.Add("第 " + position + " 条：value=" + c["value"] + "，当前坐标单位下应测得 "
                             + expected.ToString("0.###", CultureInfo.InvariantCulture) + "，实际测得 "
@@ -105,6 +107,23 @@ namespace AutoCAD.AI.Assistant.Services
         }
 
         internal static double Number(object value) { return Convert.ToDouble(value, CultureInfo.InvariantCulture); }
+        internal static double AngularDegrees(Dictionary<string, object> c)
+        {
+            var o = ReadPoint(c["center"]); var a = ReadPoint(c["p1"]); var b = ReadPoint(c["p2"]);
+            var ax = a[0] - o[0]; var ay = a[1] - o[1]; var bx = b[0] - o[0]; var by = b[1] - o[1];
+            if (ax * ax + ay * ay < 1e-16 || bx * bx + by * by < 1e-16) return Double.NaN;
+            return Math.Abs(Math.Atan2(ax * by - ay * bx, ax * bx + ay * by)) * 180 / Math.PI;
+        }
+        internal static bool IsInsideAngularSector(Dictionary<string, object> c)
+        {
+            var o = ReadPoint(c["center"]); var a = ReadPoint(c["p1"]); var b = ReadPoint(c["p2"]); var p = ReadPoint(c["position"]);
+            if (Math.Abs(p[0] - o[0]) + Math.Abs(p[1] - o[1]) < 1e-8) return false;
+            var start = Math.Atan2(a[1] - o[1], a[0] - o[0]); var end = Math.Atan2(b[1] - o[1], b[0] - o[0]);
+            var span = (end - start + 2 * Math.PI) % (2 * Math.PI);
+            if (span > Math.PI) { start = end; span = 2 * Math.PI - span; }
+            var offset = (Math.Atan2(p[1] - o[1], p[0] - o[0]) - start + 2 * Math.PI) % (2 * Math.PI);
+            return offset > 1e-8 && offset < span - 1e-8;
+        }
         internal static double[] ReadPoint(object value)
         {
             var a = value as object[];

@@ -151,6 +151,7 @@ public sealed class CadIntegrationTests
         Check(Run(roundDims) != null && Count() == countBeforeFailure + 3, "radius and diameter source unit native readback");
         var nested = "{\"commands\":[{\"type\":\"block\",\"name\":\"receipt_test\",\"commands\":[{\"type\":\"dimaligned\",\"p1\":[0,0],\"p2\":[30,40],\"position\":[-5,10],\"value\":50}]},{\"type\":\"insert\",\"name\":\"receipt_test\",\"position\":[0,0]}]}";
         Check(Run(nested) != null && File.ReadAllText(LastReceipt).Contains("\"command\":\"1.1\""), "nested block receipt preserves command identity");
+        VerifyNewFeatures();
         VerifyRevisionGuard();
         VerifyPreviewSettings();
         VerifyRecorderLifecycle();
@@ -161,6 +162,73 @@ public sealed class CadIntegrationTests
         Check(Run("{\"commands\":[" + string.Join(",", commands.ToArray()) + "]}") != null && Count() == countBeforeFailure + 400, "400 command native batch");
         Results.Add(new { test = "400 command execution", milliseconds = timer.ElapsedMilliseconds });
         Save();
+    }
+
+    private static void VerifyNewFeatures()
+    {
+        var db = AcApplication.DocumentManager.MdiActiveDocument.Database;
+        var commands = new object[] {
+            new { type="donut", center=new[]{5000,0}, innerDiameter=6, outerDiameter=10, layer="FEATURE_TEST" },
+            new { type="donut", center=new[]{5050,0}, innerDiameter=0, outerDiameter=10, layer="FEATURE_TEST" },
+            new { type="solid", points=new[]{new[]{5100,0},new[]{5104,0},new[]{5100,3}}, layer="FEATURE_TEST" },
+            new { type="solid", points=new[]{new[]{5150,0},new[]{5160,0},new[]{5160,5},new[]{5150,5}}, layer="FEATURE_TEST" },
+            new { type="polyline", points=new[]{new[]{5200,0},new[]{5210,0}}, bulges=new[]{1,0}, layer="FEATURE_TEST" },
+            new { type="dimangular", center=new[]{5300,0}, p1=new[]{5310,0}, p2=new[]{5300,10}, position=new[]{5305,5}, value=90, layer="FEATURE_TEST" },
+            new { type="leader", points=new[]{new[]{5400,0},new[]{5410,10}}, position=new[]{5420,10}, height=.35, arrowSize=.2, content="C30混凝土", layer="FEATURE_TEST" },
+            new { type="mtext", position=new[]{5450,0}, height=.35, content="说明\n复核", layer="FEATURE_TEST" }
+        };
+        var before = Count();
+        Check(Run(new JavaScriptSerializer().Serialize(new { sourceUnit="cm", coordinateUnit="source", commands=commands })) != null && Count() == before + 8,
+            "five new drawing capabilities execute atomically with source centimeter coordinates");
+        var hollow=false; var disk=false; var curve=false; var triangle=false; var quad=false; var angle=false; var leaderOk=false; var mtextOk=false;
+        using(var tr=db.TransactionManager.StartTransaction())
+        {
+            var bt=(BlockTable)tr.GetObject(db.BlockTableId,OpenMode.ForRead);
+            var space=(BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace],OpenMode.ForRead);
+            foreach(ObjectId id in space)
+            {
+                var e=(Entity)tr.GetObject(id,OpenMode.ForRead); if(e.Layer!="FEATURE_TEST")continue;
+                var p=e as Polyline;
+                if(p!=null && p.Closed)
+                {
+                    var middleRadius=p.GetPoint2dAt(0).GetDistanceTo(p.GetPoint2dAt(1))/2;
+                    var width=p.GetStartWidthAt(0);
+                    var outer=middleRadius+width/2; var inner=middleRadius-width/2;
+                    if(Math.Abs(outer-50)<1e-8 && Math.Abs(inner-30)<1e-8)hollow=p.GetBulgeAt(0)==1 && p.GetBulgeAt(1)==1;
+                    if(Math.Abs(outer-50)<1e-8 && Math.Abs(inner)<1e-8)disk=true;
+                }
+                if(p!=null && !p.Closed)curve=p.NumberOfVertices==2 && Math.Abs(p.Length-50*Math.PI)<1e-8 && Math.Abs(p.GetArcSegmentAt(0).Radius-50)<1e-8;
+                var solid=e as Solid;
+                if(solid!=null)
+                {
+                    var box=solid.GeometricExtents;
+                    if(Math.Abs(box.MaxPoint.X-box.MinPoint.X-40)<1e-8 && Math.Abs(box.MaxPoint.Y-box.MinPoint.Y-30)<1e-8)triangle=true;
+                    if(Math.Abs(box.MaxPoint.X-box.MinPoint.X-100)<1e-8 && Math.Abs(box.MaxPoint.Y-box.MinPoint.Y-50)<1e-8)quad=true;
+                }
+                var dim=e as Point3AngularDimension;
+                if(dim!=null)angle=Math.Abs(dim.Measurement-Math.PI/2)<1e-8 && Math.Abs(dim.Dimlfac-1)<1e-8 && String.IsNullOrEmpty(dim.DimensionText);
+                var ml=e as MLeader;
+                if(ml!=null)
+                {
+                    var leaders=ml.GetLeaderIndexes(); var lines=ml.GetLeaderLineIndexes(Convert.ToInt32(leaders[0]));
+                    using(var text=ml.MText)leaderOk=ml.GetFirstVertex(Convert.ToInt32(lines[0])).DistanceTo(new Autodesk.AutoCAD.Geometry.Point3d(54000,0,0))<1e-8
+                        && text.Text.Contains("C30混凝土") && Math.Abs(ml.TextHeight-3.5)<1e-8 && Math.Abs(ml.ArrowSize-2)<1e-8;
+                    leaderOk &= ml.VerticesCount(Convert.ToInt32(lines[0]))>=3 && ml.GetVertex(Convert.ToInt32(lines[0]),1)
+                        .DistanceTo(new Autodesk.AutoCAD.Geometry.Point3d(54100,100,0))<1e-8;
+                }
+                var mtext=e as MText;
+                if(mtext!=null)mtextOk=Math.Abs(mtext.TextHeight-3.5)<1e-8 && mtext.Contents.Contains("\\P");
+            }
+        }
+        Check(hollow,"native donut retains correct inner and outer radii");
+        Check(disk,"zero inner diameter renders a filled disk");
+        Check(curve,"bulge polyline is a true radius 50 arc with exact semicircle length");
+        Check(triangle && quad,"native solids preserve triangle and quadrilateral bounds");
+        Check(angle,"native angular dimension reads 90 degrees without centimeter length scaling or text override");
+        Check(leaderOk,"native MLeader preserves arrow tip bend text height arrow size and Chinese content");
+        Check(mtextOk,"native MText retains requested character height and paragraph breaks");
+        var receipt=File.ReadAllText(LastReceipt);
+        Check(receipt.Contains("\"measurement_unit\":\"deg\"") && receipt.Contains("\"expected\":90"),"angular receipt explicitly records degrees and checks its expected value");
     }
 
     private static void VerifyPreviewSettings()

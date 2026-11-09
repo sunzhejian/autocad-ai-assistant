@@ -67,6 +67,7 @@ namespace AutoCAD.AI.Assistant.Services
             Database database = document.Database;
             var previousUnits = database.Insunits;
             Extents3d? newBounds = null;
+            var modelWasEmpty = false;
             var previousVariables = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             foreach (var variable in CadPlanValidator.DrawingVariables)
             {
@@ -82,6 +83,8 @@ namespace AutoCAD.AI.Assistant.Services
                     {
                         var table = (BlockTable)transaction.GetObject(database.BlockTableId, OpenMode.ForRead);
                         var space = (BlockTableRecord)transaction.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                        modelWasEmpty = true;
+                        foreach (ObjectId existing in space) { modelWasEmpty = false; break; }
                         var layerTable = (LayerTable)transaction.GetObject(database.LayerTableId, OpenMode.ForRead);
                         var automaticScale = CadPlanQuality.SuggestDimensionScale(root);
                         if (automaticScale > 0) database.Dimscale = automaticScale;
@@ -121,7 +124,7 @@ namespace AutoCAD.AI.Assistant.Services
                     {
                         try { if (!Object.Equals(pair.Value, AcApplication.GetSystemVariable(pair.Key))) { regenerate = true; break; } } catch { }
                     }
-                    var fitted = CadViewRefresh.Refresh(document, newBounds, regenerate);
+                    var fitted = CadViewRefresh.Refresh(document, newBounds, regenerate, modelWasEmpty);
                     DiagnosticsLog.Write("绘图刷新 重生成=" + regenerate + " 调整新增范围=" + fitted);
                 }
                 catch
@@ -222,6 +225,18 @@ namespace AutoCAD.AI.Assistant.Services
                             break;
                         case "polyline":
                             created += AddPolyline(transaction, space, command, layerName);
+                            break;
+                        case "donut":
+                            created += AddDonut(transaction, space, command, layerName);
+                            break;
+                        case "solid":
+                            created += AddSolid(transaction, space, command, layerName);
+                            break;
+                        case "leader":
+                            created += AddLeader(transaction, space, database, command, layerName);
+                            break;
+                        case "dimangular":
+                            created += AddAngularDimension(transaction, space, database, command, layerName);
                             break;
                         case "rect":
                         case "rectangle":
@@ -840,15 +855,72 @@ namespace AutoCAD.AI.Assistant.Services
             var points = Points(command, "points");
             if (points.Count < 2) throw new InvalidOperationException("polyline 至少需要 2 个点。");
             var width = Number(command, "width", 0);
+            var bulges = command.ContainsKey("bulges") ? (object[])command["bulges"] : null;
             var polyline = new Polyline { Layer = layer };
             for (var i = 0; i < points.Count; i++)
             {
-                polyline.AddVertexAt(i, new Point2d(points[i].X, points[i].Y), 0, width, width);
+                polyline.AddVertexAt(i, new Point2d(points[i].X, points[i].Y), bulges == null ? 0 : ToNumber(bulges[i]), width, width);
             }
             polyline.Closed = Boolean(command, "closed");
             ApplyProperties(polyline, command);
             AppendEntity(space, polyline);
             transaction.AddNewlyCreatedDBObject(polyline, true);
+            return 1;
+        }
+
+        private static int AddDonut(Transaction transaction, BlockTableRecord space, Dictionary<string, object> command, string layer)
+        {
+            var center = Point(command, "center");
+            var inner = Number(command, "innerDiameter", 0); var outer = Number(command, "outerDiameter", 0);
+            var radius = (inner + outer) / 4; var width = (outer - inner) / 2;
+            var ring = new Polyline { Layer = layer, Closed = true };
+            ring.AddVertexAt(0, new Point2d(center.X - radius, center.Y), 1, width, width);
+            ring.AddVertexAt(1, new Point2d(center.X + radius, center.Y), 1, width, width);
+            ApplyProperties(ring, command); AppendEntity(space, ring); transaction.AddNewlyCreatedDBObject(ring, true);
+            return 1;
+        }
+
+        private static int AddSolid(Transaction transaction, BlockTableRecord space, Dictionary<string, object> command, string layer)
+        {
+            var points = Points(command, "points");
+            // AutoCAD's fourth vertex crosses the perimeter order for a quadrilateral.
+            var solid = points.Count == 3 ? new Solid(points[0], points[1], points[2], points[2])
+                : new Solid(points[0], points[1], points[3], points[2]);
+            solid.Layer = layer; ApplyProperties(solid, command); AppendEntity(space, solid); transaction.AddNewlyCreatedDBObject(solid, true);
+            return 1;
+        }
+
+        private static int AddLeader(Transaction transaction, BlockTableRecord space, Database database, Dictionary<string, object> command, string layer)
+        {
+            var height = Number(command, "height", 3.5); var points = Points(command, "points");
+            var leader = new MLeader(); leader.SetDatabaseDefaults(database); leader.Layer = layer;
+            leader.ContentType = ContentType.MTextContent; leader.LeaderLineType = LeaderType.StraightLeader;
+            leader.EnableDogleg = false; leader.EnableLanding = true; leader.LandingGap = height * .2;
+            leader.ArrowSize = Number(command, "arrowSize", height * .7);
+            using (var text = new MText { Contents = Text(command, "content"), TextHeight = height, Location = Point(command, "position") })
+            {
+                var styles = (TextStyleTable)transaction.GetObject(database.TextStyleTableId, OpenMode.ForRead);
+                text.TextStyleId = styles.Has("仿宋") ? styles["仿宋"] : database.Textstyle;
+                leader.MText = text;
+            }
+            leader.TextHeight = height;
+            // Position content first. AddLeaderLine creates its text attachment;
+            // prepend the requested vertices without moving that attachment again.
+            leader.TextLocation = Point(command, "position");
+            var line = leader.AddLeaderLine(points[points.Count - 1]);
+            for (var i = points.Count - 2; i >= 0; i--) leader.AddFirstVertex(line, points[i]);
+            ApplyProperties(leader, command); AppendEntity(space, leader); transaction.AddNewlyCreatedDBObject(leader, true);
+            return 1;
+        }
+
+        private static int AddAngularDimension(Transaction transaction, BlockTableRecord space, Database database, Dictionary<string, object> command, string layer)
+        {
+            var dimension = new Point3AngularDimension(Point(command, "center"), Point(command, "p1"), Point(command, "p2"),
+                Point(command, "position"), Text(command, "text"), DimensionStyle(transaction, database));
+            dimension.Layer = layer; ConfigureDimension(dimension, database);
+            dimension.Dimaunit = 0; dimension.Dimadec = 2;
+            ApplyProperties(dimension, command); MarkUncertain(dimension, command);
+            AppendEntity(space, dimension); transaction.AddNewlyCreatedDBObject(dimension, true);
             return 1;
         }
 
@@ -984,9 +1056,9 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 Layer = layer,
                 Location = Point(command, "position"),
-                Height = Math.Max(Number(command, "height", 3.5), 0.1),
+                TextHeight = Math.Max(Number(command, "height", 3.5), 0.1),
                 Width = Math.Max(Number(command, "width", 0), 0),
-                Contents = content,
+                Contents = content.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\\P"),
                 Rotation = Number(command, "rotation", 0) * Math.PI / 180.0
             };
             var style = Text(command, "style");
@@ -1169,7 +1241,7 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 var type = Text(c, "type").ToLowerInvariant();
                 if (type == "block") PrepareDimensionUnits((object[])c["commands"], factor);
-                else if (type.StartsWith("dim", StringComparison.Ordinal)) c["_dimensionFactor"] = factor;
+                else if (type.StartsWith("dim", StringComparison.Ordinal)) c["_dimensionFactor"] = type == "dimangular" ? 1 : factor;
             }
         }
 

@@ -6,7 +6,7 @@ namespace AutoCAD.AI.Assistant.Services
 {
     internal static class CadViewRefresh
     {
-        public static bool Refresh(Document document, Autodesk.AutoCAD.DatabaseServices.Extents3d? newBounds, bool regenerate)
+        public static bool Refresh(Document document, Autodesk.AutoCAD.DatabaseServices.Extents3d? newBounds, bool regenerate, bool frameSmall = false)
         {
             if (regenerate) document.Editor.Regen();
             else document.Editor.UpdateScreen();
@@ -19,8 +19,11 @@ namespace AutoCAD.AI.Assistant.Services
                 var box = newBounds.Value; box.TransformBy(worldFromView.Inverse());
                 var min = box.MinPoint; var max = box.MaxPoint;
                 if (!Finite(min.X) || !Finite(min.Y) || !Finite(max.X) || !Finite(max.Y)) return false;
-                if (min.X >= view.CenterPoint.X - view.Width * .48 && max.X <= view.CenterPoint.X + view.Width * .48
-                    && min.Y >= view.CenterPoint.Y - view.Height * .48 && max.Y <= view.CenterPoint.Y + view.Height * .48) return false;
+                var inside = min.X >= view.CenterPoint.X - view.Width * .48 && max.X <= view.CenterPoint.X + view.Width * .48
+                    && min.Y >= view.CenterPoint.Y - view.Height * .48 && max.Y <= view.CenterPoint.Y + view.Height * .48;
+                var occupancy = Math.Max((max.X - min.X) / view.Width, (max.Y - min.Y) / view.Height);
+                var tinyFirstDrawing = frameSmall && occupancy > 1e-9 && occupancy < .25;
+                if (inside && !tinyFirstDrawing) return false;
                 var aspect = view.Width / view.Height;
                 view.Height = Math.Max(.001, Math.Max(max.Y - min.Y, (max.X - min.X) / aspect) * 1.15);
                 view.Width = view.Height * aspect;

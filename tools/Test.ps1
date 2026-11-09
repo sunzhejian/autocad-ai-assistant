@@ -6,7 +6,7 @@ try {
     $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
     New-Item -ItemType Directory -Path artifacts -Force | Out-Null
     $sources = @('tests\RegressionTests.cs', 'Models\ChatItem.cs', 'Models\ModelConfiguration.cs', 'Models\CadShortcut.cs',
-        'Services\BackgroundWork.cs', 'Services\ChatRetention.cs', 'Services\ShortcutCatalog.cs',
+        'Services\BackgroundWork.cs', 'Services\StreamingPreview.cs', 'Services\ChatRetention.cs', 'Services\ShortcutCatalog.cs',
         'Services\PreparedCadPlan.cs',
         'Services\AtomicFile.cs', 'Services\ModelSettingsStore.cs', 'Services\StartupSettingsBackup.cs',
         'Services\CadPlanText.cs', 'Services\CadPlanQuality.cs', 'Services\CadPlanValidator.cs', 'Services\CadPlanNormalizer.cs', 'Services\HatchMaterialPolicy.cs', 'Services\HatchBoundaryValidator.cs',
