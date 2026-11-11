@@ -60,6 +60,14 @@ def hatch_matches_section(hatch, outer, inner):
                for expected in [outer, inner])
 
 
+def oblique_ticks(dim):
+    style = dim.override()
+    if style.get('dimtsz', 0) > 0:
+        return True
+    names = [style.get('dimblk1', ''), style.get('dimblk2', '')] if style.get('dimsah', 0) else [style.get('dimblk', '')]
+    return bool(names) and all(str(name or '').lstrip('_').upper() in {'OBLIQUE', 'ARCHTICK'} for name in names)
+
+
 def verify(path):
     doc = ezdxf.readfile(path)
     model = doc.modelspace()
@@ -124,7 +132,11 @@ def verify(path):
                 linetype = line.dxf.get("linetype", "BYLAYER")
                 if linetype.upper() == "BYLAYER":
                     linetype = doc.layers.get(line.dxf.layer).dxf.linetype
-                centers.append({"linetype": linetype, "effective_scale": line.dxf.ltscale * doc.header.get("$LTSCALE", 1)})
+                effective = line.dxf.ltscale * doc.header.get("$LTSCALE", 1)
+                pattern = doc.linetypes.get(linetype).pattern_tags if linetype in doc.linetypes else None
+                dashes = [float(tag.value) for tag in pattern.tags if tag.code == 49] if pattern is not None else []
+                centers.append({"linetype": linetype, "effective_scale": effective,
+                                "long_dash_mm": max([value for value in dashes if value > 0] or [0]) * abs(effective)})
         for polyline in model.query('LWPOLYLINE'):
             points = list(polyline.get_points('xyb'))
             if (not polyline.closed and len(points) == 2 and all(abs(p[2]) <= 1e-12 for p in points)
@@ -138,10 +150,46 @@ def verify(path):
     patterns = {h.dxf.pattern_name.upper() for h in hatches}
     check("source diagonal and particle textures are both represented", "ANSI31" in patterns and bool(patterns & {"DOTS", "AR-SAND"}))
     check("each texture preserves the actual section boundaries and empty hole", bool(hatches) and all(hatch_matches_section(h, outer, inner) for h in hatches))
+    # Source-derived broad ranges and visible choices. These do not certify fonts,
+    # dot distribution or pixel identity, and do not relax the original geometry checks.
+    check("source dimensions use oblique ticks rather than substituted arrows", len(dimensions) == 4
+          and all(oblique_ticks(dim) for dim in dimensions))
+    title_height = None
+    if len(title) == 1:
+        title_height = title[0].dxf.height if title[0].dxftype() == 'TEXT' else title[0].dxf.char_height
+    check("section title height retains the source-relative range", bool(outer) and title_height is not None
+          and .06 <= title_height / (outer[3] - outer[1]) <= .15)
+    positions = {}
+    for dim in dimensions:
+        if dim.dimtype not in (0, 1):
+            continue
+        a, b = dim.dxf.get('defpoint2'), dim.dxf.get('defpoint3')
+        if a is None or b is None:
+            continue
+        measurement = math.hypot(b.x-a.x,b.y-a.y) if dim.dimtype == 1 else float(dim.get_measurement())
+        reading = measurement * dim.override().get('dimlfac', 1)
+        for expected in [1000, 1100, 700, 800]:
+            if near(reading, expected):
+                positions.setdefault(expected, []).append(dim.dxf.get('defpoint'))
+    positioned = bool(outer and inner) and all(len(positions.get(value, [])) == 1 and positions[value][0] is not None
+                                            for value in [1000, 1100, 700, 800])
+    if positioned:
+        top, outside, internal, inside_height = [positions[value][0] for value in [1000,1100,700,800]]
+        positioned = (top.y > outer[3] and (inner[1]+inner[3])/2 < internal.y < inner[3]
+                      and outer[2] < inside_height.x < outside.x)
+    check("dimension lines retain source top, internal and right-side stacking", positioned)
+    check("actual centerline long dashes retain the visible source-relative range", bool(outer) and len(centers) == 2
+          and all(math.isfinite(c['long_dash_mm']) and .10 <= c['long_dash_mm']/(outer[3]-outer[1]) <= .80 for c in centers))
     return {"case": "sixth-section33", "dxf_sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
-            "scope": "Selected source semantics only; font shapes, all line spacing and pixel identity require visual review.",
-            "source_accuracy_verified": False, "verifier_version": 4, "checks": checks, "passed": sum(c["passed"] for c in checks),
-            "total": len(checks), "hatch_patterns": sorted(patterns), "centerlines": centers}
+            "scope": "Selected source geometry, layout, tick choice and broad title/dash size ranges; font shapes, texture distribution and pixel identity still require scale-correct visual review.",
+            "source_accuracy_verified": False, "verifier_version": 5, "checks": checks, "passed": sum(c["passed"] for c in checks),
+            "total": len(checks), "hatch_patterns": sorted(patterns), "centerlines": centers, "title_height_mm": title_height,
+            "outer_bounds_mm": outer, "inner_bounds_mm": inner,
+            "dimension_line_positions_mm": {str(value): [list(point) if point is not None else None for point in points]
+                                            for value, points in positions.items()},
+            "source_layout_expectations": {"outer_width": "above outer top", "inner_width": "inside upper half of the hole",
+                                           "heights": "right of outer contour, inner-height dimension then outer-height dimension"},
+            "source_long_dash_range_mm": [1100,8800], "source_title_height_range_mm": [660,1650]}
 
 
 if __name__ == "__main__":

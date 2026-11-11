@@ -45,6 +45,7 @@ internal static class RegressionTests
             TestPlanBudgets();
             TestDimensionSizeSemantics();
             TestGeometryReferences();
+            TestDimensionAnchors();
             TestReferenceRepair().GetAwaiter().GetResult();
             TestImageLinetypes();
             TestDimensionFormatVariables();
@@ -427,6 +428,79 @@ internal static class RegressionTests
         meter = meter.Replace("{\"commands\":", "{\"sourceUnit\":\"m\",\"coordinateUnit\":\"source\",\"commands\":");
         Check(CadPlanValidator.Validate(meter) != null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(meter)) != null,
             "meter source units do not accidentally enlarge the reference tolerance by 1000");
+    }
+
+    private static void TestDimensionAnchors()
+    {
+        var geometry = "{\"type\":\"rect\",\"id\":\"opening\",\"p1\":[850,950],\"p2\":[150,150]}";
+        foreach (var side in new[] { "top", "bottom", "left", "right" })
+        {
+            var vertical = side == "left" || side == "right";
+            var command = "{\"type\":\"dimlinear\",\"reference\":\"opening\",\"side\":\"" + side
+                + "\",\"position\":[1050,550],\"value\":" + (vertical ? 800 : 700) + "}";
+            var plan = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[" + geometry + "," + command + "]}";
+            Check(CadPlanValidator.Validate(plan) == null,"rectangle-side " + side + " validates without model-invented extension endpoints");
+            var prepared = PreparedCadPlan.Create(plan);
+            var root = prepared.Claim(); var resolved = (Dictionary<string, object>)((object[])root["commands"])[1];
+            var a = CadPlanQuality.ReadPoint(resolved["p1"]); var b = CadPlanQuality.ReadPoint(resolved["p2"]);
+            var correct = vertical ? a[0] == (side == "left" ? 1500 : 8500) && b[0] == a[0] && a[1] == 1500 && b[1] == 9500
+                : a[1] == (side == "bottom" ? 1500 : 9500) && b[1] == a[1] && a[0] == 1500 && b[0] == 8500;
+            Check(correct && !resolved.ContainsKey("side") && Convert.ToInt32(resolved["rotation"]) == (vertical ? 90 : 0),
+                "rectangle-side " + side + " resolves reversed corners and converts cm exactly once");
+            Check(CadDimensionAnchors.ResolveJson(prepared.Json) == prepared.Json,
+                "prepared " + side + " anchor plan replays without generating or scaling endpoints again");
+        }
+        var dimension = "{\"type\":\"dimlinear\",\"reference\":\"opening\",\"side\":\"right\",\"position\":[1050,550],\"value\":800}";
+        var valid = Plan(geometry + "," + dimension);
+        Check(CadPlanValidator.Validate(valid.Replace(":800", ":850")) != null,
+            "local endpoint calculation does not overwrite an inconsistent source reading to force success");
+        Check(CadPlanValidator.Validate(valid.Replace("\"side\":\"right\"", "\"side\":\"right\",\"p1\":[1000,150]")) != null,
+            "explicit endpoints cannot conflict with rectangle-side intent");
+        Check(CadPlanValidator.Validate(valid.Replace("\"side\":\"right\"", "\"side\":\"right\",\"rotation\":0")) != null,
+            "a contradictory explicit rotation is rejected rather than silently changed");
+        Check(CadPlanValidator.Validate(valid.Replace("\"side\":\"right\"", "\"side\":\"right\",\"rotation\":90")) == null,
+            "a redundant but correct vertical rotation from a real AI failure avoids needless repair");
+        Check(CadPlanValidator.Validate(valid.Replace("\"side\":\"right\"", "\"side\":\"top\",\"rotation\":0").Replace(":800", ":700")) == null,
+            "a redundant horizontal rotation retains exact side endpoints and source value");
+        Check(CadPlanValidator.Validate(valid.Replace("\"reference\":\"opening\",", "")) != null,
+            "automatic rectangle endpoints never guess a missing geometry reference");
+        Check(CadPlanValidator.Validate(valid.Replace("\"side\":\"right\"", "\"side\":\"nearest\"")) != null,
+            "unsupported side selection cannot guess the nearest or visible edge");
+        Check(CadPlanValidator.Validate(Plan(dimension + "," + geometry)) == null,
+            "side intent can refer to a later rectangle in the same scope");
+        var block = "{\"type\":\"block\",\"name\":\"view\",\"commands\":[" + geometry + "," + dimension + "]}";
+        Check(CadPlanValidator.Validate(Plan(block)) == null,
+            "side resolution uses the local block geometry");
+        Check(CadPlanValidator.Validate(Plan(geometry + ",{\"type\":\"block\",\"name\":\"other\",\"commands\":[" + dimension + "]}")) != null,
+            "side resolution never borrows a rectangle from another block scope");
+        Check(CadPlanValidator.Validate(valid.Replace("\"dimlinear\"", "\"dimaligned\"")) != null,
+            "unimplemented aligned side intent is explicit rather than approximated");
+        var polygon = "{\"type\":\"polyline\",\"id\":\"opening\",\"points\":[[150,150],[850,150],[850,950],[150,950]],\"closed\":true}";
+        Check(CadPlanValidator.Validate(Plan(polygon + "," + dimension)) != null,
+            "arbitrary polyline bounds are not treated as an implicit rectangle measurement");
+        var p1=new List<object>();var p2=new List<object>();
+        for(var i=0;i<9998;i++)p1.Add(new[]{i,0});for(var i=0;i<9999;i++)p2.Add(new[]{i,1});
+        var raw=Json.Serialize(new {commands=new object[]{new{type="polyline",points=p1.ToArray()},new{type="polyline",points=p2.ToArray()},
+            Json.DeserializeObject(geometry),Json.DeserializeObject(dimension)}});
+        Check(CadPlanValidator.Validate(raw).Contains("20000"),
+            "generated anchor endpoints count toward the whole-plan input budget");
+        Check(CadPlanValidator.Validate(valid.Replace("[850,950]", "[850]")) != null,
+            "malformed target coordinates produce a validation error instead of an anchor resolver crash");
+        var alias=valid.Replace("\"p1\":[850,950],\"p2\":[150,150]", "\"points\":[[850,950],[150,150]]");
+        Check(CadPlanValidator.Validate(alias)==null,
+            "actual AI rect points-pair format can be adapted locally without a second model call");
+        var resolvedAlias=CadDimensionAnchors.ResolveJson(alias);
+        Check(!resolvedAlias.Contains("\"points\"") && resolvedAlias.Contains("\"p1\":[850,150]")
+            && CadPlanValidator.Validate(resolvedAlias)==null,
+            "rectangle input adaptation preserves both opposite corners and computes the same referenced side");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"rect\",\"points\":[[0,0],[30,40]]}"))==null,
+            "unreferenced rectangle points-pair format uses the same exact adapter");
+        Check(CadPlanValidator.Validate(alias.Replace("[[850,950],[150,150]]","[[850,950],[150,150],[0,0]]"))!=null,
+            "arbitrary polygon points cannot become an invented rectangular bounding box");
+        Check(CadPlanValidator.Validate(alias.Replace("\"points\":", "\"p1\":[0,0],\"points\":"))!=null,
+            "ambiguous mixed rectangle formats cannot silently select one coordinate source");
+        Check(CadPlanValidator.Validate(valid.Replace("\"id\":\"opening\"", "\"id\":\"opening\",\"rotation\":45"))!=null,
+            "rectangle rotation cannot be silently ignored while claiming accurate geometry");
     }
 
     private static async Task TestReferenceRepair()

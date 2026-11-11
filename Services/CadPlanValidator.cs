@@ -51,6 +51,14 @@ namespace AutoCAD.AI.Assistant.Services
             if (commands.Length == 0) { errors.Add("commands 为空。"); return; }
             var budgetError = CadPlanBudget.Check(commands);
             if (budgetError != null) { errors.Add(budgetError); return; }
+            bool anchorsChanged;
+            var anchorError = CadDimensionAnchors.Resolve(root, out anchorsChanged);
+            if (anchorError != null) { errors.Add(anchorError); return; }
+            if (anchorsChanged)
+            {
+                budgetError = CadPlanBudget.Check(commands);
+                if (budgetError != null) { errors.Add(budgetError); return; }
+            }
             if (root.ContainsKey("sourceUnit") && !CadPlanQuality.IsUnit(Text(root, "sourceUnit")))
                 errors.Add("sourceUnit 仅支持 mm/cm/m，源单位坐标由执行器换算为毫米。");
             if (root.ContainsKey("coordinateUnit") && Text(root, "coordinateUnit") != "mm" && Text(root, "coordinateUnit") != "source")
@@ -210,6 +218,8 @@ namespace AutoCAD.AI.Assistant.Services
             }
             if (type == "rect" || type == "rectangle")
             {
+                if (command.ContainsKey("rotation") && IsNumber(command["rotation"]) && ToNumber(command["rotation"]) != 0)
+                    return "rect仅支持世界XY轴对齐矩形；旋转轮廓请明确给出polyline顶点。";
                 return Point(command, "p1") ?? Point(command, "p2");
             }
             if (type == "ngon" || type == "polygon")

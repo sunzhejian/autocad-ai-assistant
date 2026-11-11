@@ -79,6 +79,7 @@
     <Compile Include="Services\CadDimensionSizing.cs" />
     <Compile Include="Services\CadGeometryReferences.cs" />
     <Compile Include="Services\CadPlanBudget.cs" />
+    <Compile Include="Services\CadDimensionAnchors.cs" />
     <Compile Include="Services\CadViewRefresh.cs" />
     <Compile Include="Services\CadExecutionReceipt.cs" />
     <Compile Include="Services\CadRevisionGuard.cs" />

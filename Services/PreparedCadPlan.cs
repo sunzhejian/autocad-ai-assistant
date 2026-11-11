@@ -17,6 +17,7 @@ namespace AutoCAD.AI.Assistant.Services
         {
             var error = CadPlanValidator.Validate(json);
             if (error != null) throw new InvalidOperationException("计划校验失败：" + error);
+            json = CadDimensionAnchors.ResolveJson(json);
             bool modelDimensionLengths;
             json = CadPlanNormalizer.Normalize(json, out modelDimensionLengths);
             error = CadPlanValidator.Validate(json);

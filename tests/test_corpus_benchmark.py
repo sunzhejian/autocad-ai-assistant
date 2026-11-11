@@ -18,22 +18,23 @@ import summarize_reasoning
 
 def reference_document():
     doc = ezdxf.new('R2010', setup=True)
+    doc.dimstyles.get('Standard').dxf.dimtsz=2.5
     doc.header['$INSUNITS'] = 4
     model = doc.modelspace()
     outer = [(0, 0), (10000, 0), (10000, 11000), (0, 11000)]
     inner = [(1500, 1500), (8500, 1500), (8500, 9500), (1500, 9500)]
     model.add_lwpolyline(outer, close=True)
     model.add_lwpolyline(inner, close=True)
-    for p1, p2, base, angle in [((0,0),(10000,0),(0,-1000),0),
-                                ((0,0),(0,11000),(-1000,0),90),
-                                ((1500,1500),(8500,1500),(0,1000),0),
-                                ((1500,1500),(1500,9500),(1000,0),90)]:
+    for p1, p2, base, angle in [((0,0),(10000,0),(0,12000),0),
+                                ((0,0),(0,11000),(12500,0),90),
+                                ((1500,1500),(8500,1500),(0,8000),0),
+                                ((1500,1500),(1500,9500),(11000,0),90)]:
         model.add_linear_dim(base=base,p1=p1,p2=p2,angle=angle,
-                             override={'dimlfac':.1}).render()
-    model.add_text('3-3',dxfattribs={'insert':(4000,-600)})
-    model.add_line((4000,-700),(6000,-700))
-    model.add_line((5000,-200),(5000,11200),dxfattribs={'linetype':'CENTER'})
-    model.add_line((-200,5500),(10200,5500),dxfattribs={'linetype':'CENTER'})
+                             override={'dimlfac':.1,'dimtsz':2.5}).render()
+    model.add_text('3-3',dxfattribs={'insert':(4000,-2500),'height':1000})
+    model.add_line((4000,-2700),(6000,-2700))
+    model.add_line((5000,-200),(5000,11200),dxfattribs={'linetype':'CENTER','ltscale':1000})
+    model.add_line((-200,5500),(10200,5500),dxfattribs={'linetype':'CENTER','ltscale':1000})
     for name in ['ANSI31','DOTS']:
         hatch=model.add_hatch()
         hatch.set_pattern_fill(name,scale=10)
@@ -51,9 +52,9 @@ class SectionVerifierTests(unittest.TestCase):
 
     def test_valid_actual_section(self):
         result=self.verify(reference_document())
-        self.assertEqual((result['passed'],result['total']),(14,14))
+        self.assertEqual((result['passed'],result['total']),(18,18))
         self.assertFalse(result['source_accuracy_verified'])
-        self.assertEqual(result['verifier_version'],4)
+        self.assertEqual(result['verifier_version'],5)
 
     def test_diamond_and_bowtie_cannot_pass_as_rectangle(self):
         for points in [[(5000,0),(10000,5500),(5000,11000),(0,5500)],
@@ -75,14 +76,14 @@ class SectionVerifierTests(unittest.TestCase):
         doc=reference_document()
         for hatch in doc.modelspace().query('HATCH'):
             hatch.paths[1].vertices=[(2000,1500,0),(9000,1500,0),(9000,9500,0),(2000,9500,0)]
-        self.assertFalse(self.verify(doc)['checks'][-1]['passed'])
+        self.assertFalse(self.verify(doc)['checks'][13]['passed'])
 
     def test_ignore_islands_and_solid_fill_fail(self):
         for attr in [('hatch_style',2),('solid_fill',1)]:
             with self.subTest(attr=attr):
                 doc=reference_document()
                 setattr(next(iter(doc.modelspace().query('HATCH'))).dxf,*attr)
-                self.assertFalse(self.verify(doc)['checks'][-1]['passed'])
+                self.assertFalse(self.verify(doc)['checks'][13]['passed'])
 
     def test_dimension_on_unrelated_parallel_line_fails(self):
         doc=reference_document()
@@ -94,14 +95,14 @@ class SectionVerifierTests(unittest.TestCase):
         doc=reference_document()
         dim=next(iter(doc.modelspace().query('DIMENSION')))
         dim.dxf.defpoint2=(0,5500,0);dim.dxf.defpoint3=(10000,5500,0)
-        self.assertEqual(self.verify(doc)['passed'],14)
+        self.assertEqual(self.verify(doc)['passed'],18)
 
     def test_aligned_dimension_uses_actual_endpoint_distance(self):
         doc=reference_document();model=doc.modelspace()
         first=next(iter(model.query('DIMENSION')));model.delete_entity(first)
-        model.add_aligned_dim(p1=(0,0),p2=(10000,0),distance=-1000,
-                              override={'dimlfac':.1}).render()
-        self.assertEqual(self.verify(doc)['passed'],14)
+        model.add_aligned_dim(p1=(0,0),p2=(10000,0),distance=12000,
+                              override={'dimlfac':.1,'dimtsz':2.5}).render()
+        self.assertEqual(self.verify(doc)['passed'],18)
 
     def test_centerline_stubs_do_not_prove_source_axes(self):
         doc=reference_document()
@@ -110,13 +111,45 @@ class SectionVerifierTests(unittest.TestCase):
                 line.dxf.start=(5000,5499,0);line.dxf.end=(5000,5501,0)
         self.assertFalse(self.verify(doc)['checks'][10]['passed'])
 
+    def test_center_name_with_nearly_continuous_dashes_does_not_prove_source_appearance(self):
+        doc=reference_document()
+        for line in doc.modelspace().query('LINE'):
+            if line.dxf.linetype=='CENTER':line.dxf.ltscale=1
+        result=self.verify(doc)
+        self.assertTrue(result['checks'][11]['passed'])
+        self.assertFalse(result['checks'][17]['passed'])
+
+    def test_arrows_cannot_replace_the_source_oblique_ticks(self):
+        doc=reference_document();dim=next(iter(doc.modelspace().query('DIMENSION')))
+        override=dim.override();override.set_arrows(blk='');override.update({'dimtsz':0});override.render()
+        self.assertFalse(self.verify(doc)['checks'][14]['passed'])
+
+    def test_named_native_oblique_arrow_blocks_are_not_mistaken_for_filled_arrows(self):
+        doc=reference_document()
+        for dim in doc.modelspace().query('DIMENSION'):
+            override=dim.override();override.set_arrows(blk='OBLIQUE');override.update({'dimtsz':0});override.render()
+        self.assertTrue(self.verify(doc)['checks'][14]['passed'])
+
+    def test_tiny_title_does_not_pass_just_because_its_text_is_present(self):
+        doc=reference_document();next(iter(doc.modelspace().query('TEXT'))).dxf.height=30
+        result=self.verify(doc)
+        self.assertTrue(result['checks'][8]['passed'])
+        self.assertFalse(result['checks'][15]['passed'])
+
+    def test_correct_vertical_measurement_on_the_left_fails_source_right_side_layout(self):
+        doc=reference_document();dim=list(doc.modelspace().query('DIMENSION'))[1]
+        dim.dxf.defpoint=(-1000,0,0)
+        result=self.verify(doc)
+        self.assertTrue(result['checks'][4]['passed'])
+        self.assertFalse(result['checks'][16]['passed'])
+
     def test_straight_polyline_underline_is_not_a_missing_source_line(self):
         doc=reference_document();model=doc.modelspace()
-        line=next(e for e in model.query('LINE') if e.dxf.start.y==-700)
+        line=next(e for e in model.query('LINE') if e.dxf.start.y==-2700)
         model.delete_entity(line)
-        model.add_lwpolyline([(4000,-700),(6000,-700)],dxfattribs={'const_width':5})
-        self.assertEqual(self.verify(doc)['passed'],14)
-        model.add_line((4000,-750),(6000,-750))
+        model.add_lwpolyline([(4000,-2700),(6000,-2700)],dxfattribs={'const_width':5})
+        self.assertEqual(self.verify(doc)['passed'],18)
+        model.add_line((4000,-2750),(6000,-2750))
         self.assertFalse(self.verify(doc)['checks'][9]['passed'])
 
 

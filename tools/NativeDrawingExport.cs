@@ -40,13 +40,28 @@ public sealed class NativeDrawingExport
             var width = max.X - min.X; var height = max.Y - min.Y;
             if (width <= 0 || height <= 0) throw new InvalidOperationException("Drawing has no finite 2D bounds.");
             var ratio = Math.Max(width / 380, height / 257);
+            var mode = "fit_preview";
+            var requested = Environment.GetEnvironmentVariable("CADAI_EXPORT_SCALE");
+            double scale;
+            if (!String.IsNullOrEmpty(requested) && (!Double.TryParse(requested, NumberStyles.Float, CultureInfo.InvariantCulture, out scale)
+                || Double.IsNaN(scale) || Double.IsInfinity(scale) || scale < 0 || scale > 1000000))
+                throw new InvalidOperationException("Invalid explicit export scale.");
+            if (!String.IsNullOrEmpty(requested) && Double.TryParse(requested, NumberStyles.Float, CultureInfo.InvariantCulture, out scale) && scale > 0)
+            {
+                if (width > 380 * scale || height > 257 * scale)
+                    throw new InvalidOperationException("Drawing would clip at the requested scale; use a larger sheet or a smaller view.");
+                ratio = scale; mode = "explicit_source_scale";
+            }
             Set("CADAI_PLOT_RATIO", ratio);
             Set("CADAI_PLOT_PAPER_WIDTH", 420); Set("CADAI_PLOT_PAPER_HEIGHT", 297);
             Set("CADAI_PLOT_ORIGIN_X", min.X - (420 * ratio - width) / 2);
             Set("CADAI_PLOT_ORIGIN_Y", min.Y - (297 * ratio - height) / 2);
             db.DxfOut(target + ".dxf", 16, DwgVersion.AC1027);
             new NativePdfPlot().Plot();
+            if (File.Exists(target + ".plot-error.txt")) throw new InvalidOperationException("Native PDF plot reported a failure.");
             if (!File.Exists(target + ".pdf")) throw new InvalidOperationException("Native PDF was not produced.");
+            File.WriteAllText(target + ".export-scale.txt", "mode=" + mode + "\nratio=" + ratio.ToString("R", CultureInfo.InvariantCulture)
+                + "\nmodel_width_mm=" + width.ToString("R", CultureInfo.InvariantCulture) + "\nmodel_height_mm=" + height.ToString("R", CultureInfo.InvariantCulture));
             File.WriteAllText(target + ".export-ok.txt", "Exported the existing drawing copy without redrawing or editing its entities.");
         }
         catch (System.Exception ex) { File.WriteAllText(target + ".export-error.txt", ex.ToString()); }

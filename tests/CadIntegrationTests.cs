@@ -159,6 +159,7 @@ public sealed class CadIntegrationTests
         VerifyOpenChannelHatch();
         VerifyGeometryReferences();
         VerifyPlanBudget();
+        VerifyDimensionAnchors();
         countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");
@@ -166,6 +167,31 @@ public sealed class CadIntegrationTests
         Check(Run("{\"commands\":[" + string.Join(",", commands.ToArray()) + "]}") != null && Count() == countBeforeFailure + 400, "400 command native batch");
         Results.Add(new { test = "400 command execution", milliseconds = timer.ElapsedMilliseconds });
         Save();
+    }
+
+    private static void VerifyDimensionAnchors()
+    {
+        var commands = new List<object>();
+        commands.Add(new {type="rect",id="opening",p1=new[]{850,950},p2=new[]{150,150}});
+        foreach (var side in new[]{"top","bottom","left","right"})
+            commands.Add(new {type="dimlinear",reference="opening",side=side,position=new[]{1050,550},value=(side=="top"||side=="bottom"?700:800)});
+        var plan = new JavaScriptSerializer().Serialize(new {sourceUnit="cm",coordinateUnit="source",commands=commands.ToArray()});
+        var before=Count();
+        Check(Run(plan)!=null && Count()==before+5,
+            "four rectangle-side intents create exact native cm dimensions without AI-specified extension endpoints");
+        var receipt=(Dictionary<string,object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(LastReceipt));
+        var checkedCount=0;
+        foreach(Dictionary<string,object> item in (object[])receipt["objects"])
+            if(item.ContainsKey("reference_checked_at_execution") && (bool)item["reference_checked_at_execution"])
+            {
+                var distances=(object[])item["reference_endpoint_distances_mm"];
+                if(Convert.ToDouble(distances[0])==0 && Convert.ToDouble(distances[1])==0)checkedCount++;
+            }
+        Check(checkedCount==4 && Convert.ToInt32(receipt["dimensions"])==4,
+            "resolved rectangle-side endpoints are independently checked against the actual native target");
+        before=Count();
+        Check(Run(plan.Replace("\"value\":800","\"value\":805"))==null && Count()==before,
+            "rectangle-side resolution refuses a wrong source reading instead of silently changing it");
     }
 
     private static void VerifyPlanBudget()

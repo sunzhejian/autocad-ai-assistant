@@ -16,7 +16,7 @@ namespace AutoCAD.AI.Assistant.Services
             "绘图协议：画图时先用≤5行中文说明，末尾输出唯一 ```cad 代码块，内容为严格 JSON：{\"commands\":[...]}。" +
             "带图片先读取单位、比例、可见视图和尺寸。根对象增加 sourceUnit: mm/cm/m（源图非高程尺寸单位）、coordinateUnit:\"source\"、views:[可见视图名]。坐标/半径/字高直接使用源图单位，勿自行乘10/1000；执行器统一换算为毫米。每条标注value也用源图原始读数。高程为m的混合单位仅作文字保留。比例只影响图框、字高和线型，不缩小实体。只复刻可见内容；不臆造未给出的视图；重叠高清块勿重复绘制。单位无法确定时询问，不输出计划。" +
             "纯文字绘图默认毫米；每条可加layer/color/lineweight（纸面mm，不随单位换算）。命令 type：" +
-            "layer{name,color,linetype,lineweight}；line{points}；polyline{points,closed,width}；rect{p1,p2}；" +
+            "layer{name,color,linetype,lineweight}；line{points}；polyline{points,closed,width}；rect{p1,p2}（也接受points:[两个对角点]，不与p1/p2混用；矩形轴对齐，旋转轮廓用polyline）；" +
             "ngon{center,sides,radius}；circle{center,radius}；arc{center,radius,start,end}；ellipse{center,major,ratio}；" +
             "donut{center,innerDiameter,outerDiameter}（原生带宽圆环，0≤内径<外径）；solid{points}（按边界顺序3点三角形或4点凸四边形的二维实心区域）；" +
             "leader{points,position,height,content,arrowSize,material,targetLayer}（原生多重引线，points依次为箭头尖、折点，position为文字位置，不能用几条散线冒充）；" +
@@ -28,6 +28,7 @@ namespace AutoCAD.AI.Assistant.Services
             "填充拓扑：U形、槽形或向外敞开的空白是外轮廓的凹缺口，应沿真实边界顺序写成一个凹多边形points；holes仅用于完全位于外环内部且不接触外环的封闭孔洞。多视图、相邻构件分别创建填充，不用相互接触或重叠的内孔拼接。保留源尺寸和实际开口，不删除孔洞、不缩小孔洞来规避校验。" +
             "dimradius{center,point}；dimdiameter{center,point}；block{name,commands}；insert{name,position,rotation,scale}；setvar{name,value}；" +
             "尺寸几何引用：可给line/rect/polyline（直边）/circle增加稳定id；dimlinear/dimaligned可加reference引用同一作用域内实际被测轮廓的id，p1/p2必须在该轮廓上，合法边中点可用。图片中能定位轮廓的线性尺寸优先声明reference；内孔尺寸引用内孔轮廓，不挂在外墙上。id在块内局部唯一；不跨块、不引用含bulges圆弧多段线或hatch，不为通过检查虚构辅助轮廓。只验证本次落图，非持久关联约束。" +
+            "矩形整体边长标注优先简写dimlinear{reference,side,position,value,confidence}，side为top/bottom/left/right（世界XY上下左右），省略p1/p2；rotation可省略，若提供须与side一致（上下为0、左右为90）。本地从该rect/rectangle精确计算端点并核对value，不修改原图读数。仅测完整矩形边长；局部长度、斜边和其他曲线仍明确给p1/p2。内孔必须引用实际内孔矩形，不用外框尺寸猜测。" +
             "standard{}（建标准图层+仿宋+SL73标注）；frame{size,title,scale,number,company,date,origin}（A0–A4 图框+标题栏，原点0,0；scale 为出图比例如 1:100，执行器按该比例整体放大图框/标题栏/字高，并自动设置 DIMSCALE 与 LTSCALE）。" +
             "规则：含块内部共≤400条；预计新建图元≤5000、输入点≤20000、填充边界合计≤8192、文字合计≤40000字符；块展开受独立工作量上限控制，不用层层插入制造海量重复。连续折线优先polyline，重复构件用block+insert，勿凑指令数。完整图纸先standard再frame；局部截图不加图框。frame固定按纸面mm生成；源单位坐标布局时，图框宽高/内框边距/字高需除以源单位毫米系数（cm为10，m为1000），避开右下标题栏。尺寸优先于像素比例；从基准和尺寸链计算坐标，保证投影对应和对称；剖面用hatch、图名说明用text。每条图片尺寸标注附value（源图读数）、confidence:read/inferred/unknown；模糊尺寸不得冒充read。source坐标模式下，dimlinear的value须等于端点在rotation方向投影长度，dimaligned为实际距离；dimdiameter的point是圆周点。text只可用<>或<>（估），不可覆盖测量值。无需复述题面。1:100字高为350mm，若sourceUnit=cm则height=35。" +
             "复刻以源图外观为准，不以通用规范替换图中实际符号。先在内部核对每个视图的外形/内孔/尺寸端点/中心线/图名和下划线数量，再输出完整计划。图名按相对图幅大小取字高，不要把图名放大到接近内孔高度，不自行添加源图没有的双下划线。" +

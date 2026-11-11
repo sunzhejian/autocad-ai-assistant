@@ -5,7 +5,7 @@
 ![AutoCAD 2024](https://img.shields.io/badge/AutoCAD-2024-red)
 ![Windows x64](https://img.shields.io/badge/Windows-x64-blue)
 
-AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前源码版本 **1.6.1**，.NET Framework 4.8 / Windows x64。
+AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前源码版本 **1.6.2**，.NET Framework 4.8 / Windows x64。
 
 **AutoCAD 2024 assistant for Windows:** native drawing tools, local vector PDF import, image-to-CAD plans, unit and hatch validation, atomic undo, and OpenAI-compatible model configuration. AI reconstruction still needs human review.
 
@@ -36,13 +36,15 @@ v1.6.0 加入[尺寸几何引用](docs/dimension-references-design.md)：线性/
 
 v1.6.1 加入[执行复杂度预算与完整回执归档](docs/performance-1.6.1-2026-11-11.md)，在进入CAD前拦截海量线段和指数级块展开，不放宽来源检查。多光标视频与可用并行的取舍见[研究记录](docs/swarm-research-2026-11-11.md)。
 
+v1.6.2 增加[矩形尺寸端点本地计算、精确格式适配与18项来源核对](docs/accuracy-1.6.2-2026-11-11.md)。六轮候选测试的尺寸引用通过，但更严格的符号/布局/中心线检查仍有失败，未达到完美复刻。纸面外观核对需按原图比例出图，局部放大预览不能代替。
+
 ## 使用
 
 1.4.2 补充[混凝土示例与材料引线校核](docs/concrete-1.4.2-2026-11-09.md)：材料剖面需有实际填充和内孔，带材料标识的引线须指向对应材料区域。旧引线/黑色实心区域语法拼图不能作为混凝土效果验收，预览已替换。
 
 1. 安装发布包，或编译 Release x64 后运行 `Install.ps1`；重启 AutoCAD，输入 `AI`。
 2. 配置支持视觉输入的模型；密钥使用当前 Windows 用户的 DPAPI 加密保存在本地。
-3. 点击“图/PDF”选择文件，或用 Ctrl+V 粘贴图片/PDF 文件。图片默认发送一张最长边 1600px 的增强图；单视图优先“框选”，并在输入中保留源图单位说明。
+3. 点击“图/PDF”选择文件，或用 Ctrl+V 粘贴图片/PDF 文件。图片默认发送一张最长边 1600px 的增强图；单视图优先“框选”，并在输入中保留整页的单位、比例与相关图例说明。
 4. 复杂大图可勾选“精细分块”，同时发送整图和四张重叠高清图，模型处理时间可能增加。
 5. 绘图前自动校验 JSON、尺寸与几何、填充边界及内孔、块依赖与指令预算；可修正一次，仍不通过则停止。生成后读取原生尺寸、填充面积与内孔数，结果不一致则整批回滚。完成后一次 `U` 撤销整批。
 6. “复用已执行计划”默认开启。相同图片内容、提示、模型配置、协议与分块模式可复用七天内的计划；取消勾选可重新识别。该缓存只证明计划曾成功执行，源图识别仍需核对。
@@ -87,7 +89,7 @@ v1.2.1 默认关闭命令频次统计；可在“指令集”勾选“统计命�
 
 聊天保留最近 40 条可见消息和 12 条完整上下文消息（实际模型请求仍选最近 8 条）；长消息只展示前 8000 字符。聊天图片在后台解码，最长边 480 像素、最多同时解码 2 张；附件预览最长边 256 像素，模型仍使用原图处理流程。
 
-鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板名称应显示 **AI 1.6.1**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
+鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板名称应显示 **AI 1.6.2**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
 
 v1.2.2 图片复刻跳过旧图上下文；文字请求最多抽样 512 个图元、读取 128 个简单范围，以 25ms 为扫描目标（单次原生调用不可中断）。返回的类型与范围明确标为抽样，CAD 命令执行中则跳过扫描。面板的缓存读取与计划预检在后台运行，执行前再次核对图形状态。
 
@@ -116,7 +118,7 @@ powershell -File tools\Test-Pdf-Cad.ps1 -SourcePdf '赛题.pdf' -Page 3 -PlotPdf
 .\Install.ps1
 ```
 
-纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。v1.6.1 当前为 246 项纯回归和 52 项原生集成检查；GitHub CI 另执行 PDF worker 测试和提交文件检查，不声称在云端完成有许可的原生 CAD 验证。
+纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。v1.6.2 当前为 278 项纯回归和 55 项原生集成检查；GitHub CI 另执行 PDF worker 测试和提交文件检查，不声称在云端完成有许可的原生 CAD 验证。
 
 ## 本地题库复刻
 

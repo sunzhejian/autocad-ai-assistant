@@ -26,6 +26,14 @@ v1.5.1默认预算新样本的内孔宽度标注挂在外轮廓附近；v1.5.2�
 
 ## 原生结果核验
 
+### v1.6.2：矩形端点由本地计算
+
+完整矩形边长可以简写为`dimlinear{reference,side,position,value,confidence}`，`side`为世界XY方向的`top/bottom/left/right`。本地从同作用域的`rect/rectangle`精确取两个边端点和0/90度方向，保留原始`value`；读数与几何冲突时拒绝，不修改读数。不从任意多段线包围框或其它视图猜矩形，不计算局部长度、斜边、圆弧或半径。
+
+简写省略`p1/p2`；可省略`rotation`，若冗余提供则必须与side一致，避免为一个正确的90度字段再请求AI。显式端点和side混用、方向冲突、缺少/重复/跨作用域目标都拒绝。原始AI回答仍保留；预检后的有效计划展开成明确端点再统一换算单位，回放不重复展开或缩放，生成点同样计入预算。
+
+真实AI多次将矩形写成`rect{points:[两个对角点]}`。现在可在本地原样转换为p1/p2，保留坐标和其它属性；不接受任意多点的包围框推断，也不混用两种输入。非0矩形rotation明确拒绝，旋转轮廓必须给polyline顶点。参见[本轮试验与来源差距](accuracy-1.6.2-2026-11-11.md)。
+
 事务提交前按命令路径解析同作用域目标，使用该命令实际创建且属于同一BlockTableRecord的Line/Polyline/Circle，与原生RotatedDimension/AlignedDimension的XLine1Point/XLine2Point核对。调用[`Curve.GetClosestPointTo(point, false)`](https://help.autodesk.com/cloudhelp/2022/ENU/OARX-ManagedRefGuide/files/OARX-ManagedRefGuide-Autodesk_AutoCAD_DatabaseServices_Curve_GetClosestPointTo_Point3d__MarshalAsUnmanagedType_U1__bool.html)，不延伸曲线。缺实体、不同空间或距离超限时整批事务回滚。
 
 回执逐对象记录`geometry_reference`、`reference_command`、`reference_handles`、两端距离与容差、`reference_checked_at_execution=true`、`persistent_association_created=false`。这是一时核验，不创建AutoCAD持久关联约束，不保证后续手动改图时尺寸随动；`source_accuracy_verified`继续为false。
