@@ -42,6 +42,7 @@ internal static class RegressionTests
             TestBufferedLogs();
             TestValidation();
             TestPreparedPlan();
+            TestDimensionSizeSemantics();
             TestImageLinetypes();
             TestDimensionFormatVariables();
             TestNewDrawingFeatures();
@@ -61,6 +62,7 @@ internal static class RegressionTests
             TestAutoCompatibility().GetAwaiter().GetResult();
             TestRuntimeBehavior().GetAwaiter().GetResult();
             TestCompletionReasons().GetAwaiter().GetResult();
+            TestRepairEvidence().GetAwaiter().GetResult();
             Console.WriteLine("TOTAL " + Passed + " passed"); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex); return 1; }
@@ -304,6 +306,32 @@ internal static class RegressionTests
         Check(!DiagnosticsLog.Snapshot().Contains("buffer-0") && DiagnosticsLog.Snapshot().Contains("buffer-1199"), "diagnostic snapshot retains only recent messages");
     }
 
+    private static void TestDimensionSizeSemantics()
+    {
+        var source = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[{\"type\":\"setvar\",\"name\":\"DIMTSZ\",\"value\":25},{\"type\":\"frame\",\"size\":\"A3\",\"scale\":100},{\"type\":\"dimlinear\",\"p1\":[0,0],\"p2\":[100,0],\"position\":[0,-20]}]}";
+        var prepared = PreparedCadPlan.Create(source);
+        var root = prepared.Claim();
+        var commands = (object[])root["commands"];
+        var sizes = (Dictionary<string, double>)((Dictionary<string, object>)commands[2])["_modelDimensionSizes"];
+        Check(sizes["DIMTSZ"] == 250 && CadDimensionSizing.PaperLength(sizes["DIMTSZ"],100) == 2.5,
+            "25 cm source ticks become 250 model mm and 2.5 paper mm at 1:100, without double scaling");
+        var repeated = PreparedCadPlan.Create(prepared.Json);
+        Check(repeated.FinalModelDimensionSizes["DIMTSZ"] == 250 && CadPlanNormalizer.Normalize(prepared.Json) == prepared.Json,
+            "normalized plan replay retains dimension-length semantics and is idempotent");
+        Check(PreparedCadPlan.Create(source.Replace("\"source\"", "\"mm\"")).FinalModelDimensionSizes.Count == 0,
+            "legacy millimeter plans preserve native dimension-variable semantics");
+        var reset = source.Replace("{\"type\":\"frame\"", "{\"type\":\"standard\"},{\"type\":\"frame\"");
+        var afterStandard = PreparedCadPlan.Create(reset);
+        Check(afterStandard.FinalModelDimensionSizes.Count == 0,
+            "standard command resets previous source-size overrides in execution order");
+        var plain = Plan("{\"type\":\"dimlinear\",\"p1\":[0,0],\"p2\":[100,0],\"position\":[0,-20],\"_modelDimensionSizes\":{\"DIMTSZ\":999}}");
+        var ignored = PreparedCadPlan.Create(plain).Claim();
+        Check(!((Dictionary<string,object>)((object[])ignored["commands"])[0]).ContainsKey("_modelDimensionSizes"),
+            "untrusted internal dimension-size annotations are discarded before preparation");
+        try { CadDimensionSizing.PaperLength(250,0); Check(false,"unknown annotation scale"); }
+        catch(InvalidOperationException) { Check(true,"unknown annotation scale cannot silently invent paper lengths"); }
+    }
+
     private static void TestHatchBoundaries()
     {
         Func<string, string, string> hatch = (points, holes) => Plan("{\"type\":\"hatch\",\"points\":" + points + ",\"holes\":" + holes + "}");
@@ -315,6 +343,11 @@ internal static class RegressionTests
         Check(CadPlanValidator.Validate(hatch(square, "[[[0,2],[8,2],[8,8],[0,8]]]")) != null, "touching hatch hole rejected");
         Check(CadPlanValidator.Validate(hatch(square, "[[[1,1],[7,1],[7,7],[1,7]],[[5,5],[9,5],[9,9],[5,9]]]")) != null, "overlapping hatch holes rejected");
         Check(CadPlanValidator.Validate(hatch("[[0,0],[10,0],[10,10],[0,10],[0,0]]", "[]")) == null, "explicit hatch closure accepted");
+        var openSection = "[[0,0],[10,0],[10,10],[8,10],[8,2],[2,2],[2,10],[0,10]]";
+        Check(CadPlanValidator.Validate(hatch(openSection, "[]")) == null, "U-shaped open channel is an actual concave outer boundary without a false hole");
+        var contact = CadPlanValidator.Validate(hatch(square, "[[[2,2],[8,2],[8,10],[2,10]]]"));
+        Check(contact != null && contact.Contains("凹多边形") && contact.Contains("[8,10]") && contact.Contains("不得删除孔洞"),
+            "touching-hole repair explains offending segments and open-boundary topology without deleting source voids");
     }
 
     private static void TestPdfSnapshot(string folder)
@@ -519,6 +552,41 @@ internal static class RegressionTests
         preview = new StreamingPreview(); preview.Append(new String('x', 100000));
         Check(preview.BufferedCharacters <= 8000 && preview.Take().Length < 8100 && preview.Take() == null,
             "stream preview is bounded and emits each changed snapshot only once");
+    }
+
+    private static async Task TestRepairEvidence()
+    {
+        var invalid = Plan("{\"type\":\"hatch\",\"points\":[[0,0],[10,0],[10,10],[0,10]],\"holes\":[[[2,2],[8,2],[8,10],[2,10]]]} ");
+        var repaired = Plan("{\"type\":\"hatch\",\"points\":[[0,0],[10,0],[10,10],[8,10],[8,2],[2,2],[2,10],[0,10]]}");
+        using (var s = new Server())
+        {
+            var raw = new List<string>();
+            var client = new OpenAiCompatibleClient { ResponseObserver = (stage, body) => raw.Add(stage + ":" + body) };
+            s.Response = i => Tuple.Create(200, Reply(i == 1 ? invalid : repaired));
+            var answer = await client.CompleteAsync(Model(s), History(), "", null);
+            Check(raw.Count == 2 && raw[0] == "http-200:" + Reply(invalid) && raw[1] == "http-200:" + Reply(repaired),
+                "optional observer retains both original and repaired response bodies without changing them");
+            Check(s.Requests.Count == 2 && s.Requests[1].Contains("凹多边形") && s.Requests[1].Contains("不得删除孔洞")
+                && CadPlanText.Extract(answer) == repaired, "single repair receives actionable opening diagnostics and preserves the real U-section");
+        }
+        using (var s = new Server())
+        {
+            string captured = null;
+            var client = new OpenAiCompatibleClient { ResponseObserver = (stage, body) => captured = body };
+            var filtered = Reply(repaired).Replace("\"stop\"", "\"content_filter\"");
+            s.Response = i => Tuple.Create(200, filtered);
+            try { await client.CompleteAsync(Model(s), History(), "", null); Check(false, "filtered response diagnostics"); }
+            catch (InvalidOperationException) { Check(captured == filtered && s.Requests.Count == 1, "rejected model output remains inspectable without an extra request"); }
+        }
+        using (var s = new Server())
+        {
+            var events = new List<string>();
+            var client = new OpenAiCompatibleClient { ResponseObserver = (stage, body) => events.Add(stage) };
+            s.Response = i => Tuple.Create(200, StreamReply("OBSERVED"));
+            var answer = await client.CompleteAsync(Model(s), History(), "", null, value => { });
+            Check(answer == "OBSERVED" && events.Count == 1 && events[0] == "sse", "optional stream observer captures provider events without duplicate model calls");
+        }
+        Check(new OpenAiCompatibleClient().ResponseObserver == null, "normal plugin requests do not opt into raw-response persistence");
     }
 
     private static async Task TestCompletionReasons()

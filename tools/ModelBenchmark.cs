@@ -7,6 +7,8 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
@@ -22,7 +24,10 @@ internal static class ModelBenchmark
         var timer = Stopwatch.StartNew();
         try
         {
+            using (var sha = SHA256.Create())
+                report["plugin_sha256"] = BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(args[0]))).Replace("-", "").ToLowerInvariant();
             var assembly = Assembly.LoadFrom(Path.GetFullPath(args[0]));
+            report["plugin_version"] = assembly.GetName().Version.ToString();
             var storeType = assembly.GetType("AutoCAD.AI.Assistant.Services.ModelSettingsStore", true);
             var store = Activator.CreateInstance(storeType, true);
             var configs = ((IEnumerable)storeType.GetMethod("Load").Invoke(store, null)).Cast<object>().ToList();
@@ -32,6 +37,11 @@ internal static class ModelBenchmark
             var model = String.IsNullOrWhiteSpace(requested) ? configs[0] : configs.SingleOrDefault(c => String.Equals(Convert.ToString(modelType.GetProperty("ModelId").GetValue(c, null)), requested, StringComparison.OrdinalIgnoreCase));
             if (model == null) throw new Exception("The requested model ID is not configured.");
             report["model"] = modelType.GetProperty("ModelId").GetValue(model, null);
+            var identity = new Dictionary<string, object>();
+            foreach (var property in new[] { "ModelId", "RequestUrl", "UseFullUrl", "SystemPrompt" })
+                identity[property] = modelType.GetProperty(property).GetValue(model, null);
+            using (var sha = SHA256.Create())
+                report["model_configuration_sha256"] = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(identity)))).Replace("-", "").ToLowerInvariant();
             if (args.Length == 5 && args[3] == "--cache-plan")
             {
                 var cacheType = assembly.GetType("AutoCAD.AI.Assistant.Services.DrawingPlanCache", true);
@@ -67,17 +77,51 @@ internal static class ModelBenchmark
             history.Add(chat);
             var clientType = assembly.GetType("AutoCAD.AI.Assistant.Services.OpenAiCompatibleClient", true);
             var client = Activator.CreateInstance(clientType, true);
+            var responses = new List<Dictionary<string, object>>();
+            report["raw_responses"] = responses;
+            var observerProperty = clientType.GetProperty("ResponseObserver");
+            report["response_capture_available"] = observerProperty != null;
+            if (observerProperty != null)
+            {
+                Action<string, string> capture = delegate(string stage, string body)
+                {
+                    var path = Path.ChangeExtension(args[2], ".response-" + (responses.Count + 1).ToString("00") + ".json");
+                    File.WriteAllText(path, body, new UTF8Encoding(false));
+                    string hash;
+                    using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(body))).Replace("-", "").ToLowerInvariant();
+                    var record = new Dictionary<string, object> { { "stage", stage }, { "file", Path.GetFileName(path) }, { "sha256", hash } };
+                    try
+                    {
+                        var payload = Json.DeserializeObject(body) as Dictionary<string, object>;
+                        if (payload != null && payload.ContainsKey("model") && payload["model"] is string)
+                            record["provider_reported_model"] = payload["model"];
+                        var usage = payload != null && payload.ContainsKey("usage") ? payload["usage"] as Dictionary<string, object> : null;
+                        if (usage != null)
+                        {
+                            var counts = new Dictionary<string, object>();
+                            foreach (var name in new[] { "prompt_tokens", "completion_tokens", "total_tokens" })
+                                if (usage.ContainsKey(name) && (usage[name] is int || usage[name] is long)) counts[name] = usage[name];
+                            record["provider_reported_usage"] = counts;
+                        }
+                    }
+                    catch { /* Keep raw invalid responses; metadata is optional, not a parser fallback. */ }
+                    responses.Add(record);
+                };
+                observerProperty.SetValue(client, capture, null);
+            }
             var streaming = Environment.GetEnvironmentVariable("CADAI_BENCH_STREAM") == "1";
-            var method = clientType.GetMethods().Single(m => m.Name == "CompleteAsync" && m.GetParameters().Length == (streaming ? 5 : 4));
+            var details = Environment.GetEnvironmentVariable("CADAI_BENCH_DETAILS") == "1";
+            var method = clientType.GetMethods().Single(m => m.Name == "CompleteAsync" && m.GetParameters().Length == (details ? 8 : streaming ? 5 : 4));
             var image = args[1] == "-" ? null : Path.GetFullPath(args[1]);
             var deltaCharacters = 0;
             Action<string> delta = value => deltaCharacters += value.Length;
-            var call = streaming ? new object[] { model, history, "", image, delta } : new object[] { model, history, "", image };
+            var call = details ? new object[] { model, history, "", image, streaming ? delta : null, CancellationToken.None, null, true }
+                : streaming ? new object[] { model, history, "", image, delta } : new object[] { model, history, "", image };
             var answer = ((Task<string>)method.Invoke(client, call)).GetAwaiter().GetResult();
             report["stream_requested"] = streaming; report["stream_callback_characters"] = deltaCharacters;
+            report["detailed_images"] = details;
             report["answer"] = answer;
-            var match = Regex.Match(answer, @"```(?:cad|json)\s*\r?\n([\s\S]*?)```", RegexOptions.IgnoreCase);
-            var plan = match.Success ? match.Groups[1].Value.Trim() : answer.Trim().StartsWith("{") ? answer.Trim() : null;
+            var plan = (string)assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanText", true).GetMethod("Extract").Invoke(null, new object[] { answer });
             report["plan"] = plan;
             report["validation"] = plan == null ? (image == null ? null : "No plan") : assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanValidator", true)
                 .GetMethod("Validate").Invoke(null, new object[] { plan });

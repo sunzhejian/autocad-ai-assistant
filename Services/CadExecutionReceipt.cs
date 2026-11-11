@@ -60,6 +60,25 @@ namespace AutoCAD.AI.Assistant.Services
                             throw new InvalidOperationException("原生标注测量失败：第 " + pair.Value + " 条。");
                         record["measurement"] = actual; record["unit_factor"] = dimension.Dimlfac;
                         record["text"] = dimension.DimensionText;
+                        record["dimension_scale"] = dimension.Dimscale;
+                        var sizes = command.ContainsKey("_modelDimensionSizes") ? command["_modelDimensionSizes"] as Dictionary<string, double> : null;
+                        if (sizes != null)
+                        {
+                            var paper = new Dictionary<string, double>();
+                            var model = new Dictionary<string, double>();
+                            foreach (var expectedSize in sizes)
+                            {
+                                var value = DimensionLength(dimension, expectedSize.Key);
+                                paper[expectedSize.Key] = value;
+                                var actualSize = value * dimension.Dimscale;
+                                model[expectedSize.Key] = actualSize;
+                                if (Double.IsNaN(actualSize) || Double.IsInfinity(actualSize)
+                                    || Math.Abs(actualSize - expectedSize.Value) > Math.Max(1e-8, Math.Abs(expectedSize.Value) * 1e-8))
+                                    throw new InvalidOperationException("原生标注格式长度重复缩放或不一致：" + expectedSize.Key);
+                            }
+                            record["dimension_lengths_paper_mm"] = paper;
+                            record["dimension_lengths_model_mm"] = model;
+                        }
                         if (command.ContainsKey("value"))
                         {
                             var expected = CadPlanQuality.Number(command["value"]);
@@ -91,10 +110,12 @@ namespace AutoCAD.AI.Assistant.Services
                         try
                         {
                             var box = entity.GeometricExtents;
+                            record["bounds_min_mm"] = new[] { box.MinPoint.X, box.MinPoint.Y, box.MinPoint.Z };
+                            record["bounds_max_mm"] = new[] { box.MaxPoint.X, box.MaxPoint.Y, box.MaxPoint.Z };
                             if (ModelBounds.HasValue) { var combined = ModelBounds.Value; combined.AddExtents(box); ModelBounds = combined; }
                             else ModelBounds = box;
                         }
-                        catch { }
+                        catch { record["bounds_available"] = false; }
                     }
                 }
                 catch (Exception ex) { throw new InvalidOperationException("原生校核第 " + pair.Value + " 条（" + entity.GetType().Name + "）：" + ex.Message, ex); }
@@ -115,6 +136,19 @@ namespace AutoCAD.AI.Assistant.Services
                 total += a[0] * b[1] - b[0] * a[1];
             }
             return Math.Abs(total) / 2;
+        }
+        private static double DimensionLength(Dimension dimension, string name)
+        {
+            switch(name)
+            {
+                case "DIMTXT": return dimension.Dimtxt;
+                case "DIMASZ": return dimension.Dimasz;
+                case "DIMTSZ": return dimension.Dimtsz;
+                case "DIMEXO": return dimension.Dimexo;
+                case "DIMEXE": return dimension.Dimexe;
+                case "DIMGAP": return dimension.Dimgap;
+                default: throw new InvalidOperationException("未知标注长度变量：" + name);
+            }
         }
         public string Save(string plan, string name)
         {

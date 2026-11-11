@@ -1,13 +1,17 @@
-param([Parameter(Mandatory=$true)][string]$Plan, [Parameter(Mandatory=$true)][string]$Name, [string]$AutoCADPath = 'D:\AutoCAD 2024', [switch]$PlotPdf)
+param([Parameter(Mandatory=$true)][string]$Plan, [Parameter(Mandatory=$true)][string]$Name, [string]$AutoCADPath = 'D:\AutoCAD 2024', [switch]$PlotPdf, [string]$PluginDll, [string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw 'Name must use ASCII letters, digits, underscores or hyphens' }
 $root = Split-Path $PSScriptRoot -Parent
-$output = Join-Path $root 'artifacts\reproductions'
+$output = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root 'artifacts\reproductions' }
+if (-not $PluginDll) { $PluginDll = Join-Path $root 'bin\Release\AutoCAD.AI.Assistant.dll' }
+if (-not (Test-Path -LiteralPath $PluginDll -PathType Leaf)) { throw 'Plugin DLL not found.' }
+$PluginDll = [IO.Path]::GetFullPath($PluginDll)
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $scratch = Join-Path $env:TEMP ('cadai-repro-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 $plugin = Join-Path $scratch 'AutoCAD.AI.Assistant.dll'
-Copy-Item -LiteralPath (Join-Path $root 'bin\Release\AutoCAD.AI.Assistant.dll') -Destination $plugin
+Copy-Item -LiteralPath $PluginDll -Destination $plugin
+$pluginHash = (Get-FileHash -LiteralPath $plugin).Hash.ToLowerInvariant()
 $env:CADAI_PLUGIN_DLL = $plugin
 $env:CADAI_DATA_DIR = Join-Path $scratch 'plugin-data'
 $env:CADAI_TEST_REPORT = Join-Path $scratch 'report.json'
@@ -62,6 +66,7 @@ if($PlotPdf){$lines+=@('AIPDF')}
 $lines+=@('_.QUIT','_Y','')
 $lines | Set-Content -LiteralPath $script -Encoding ASCII
 & python (Join-Path $PSScriptRoot 'run_console.py') (Join-Path $AutoCADPath 'accoreconsole.exe') $script (Join-Path $output ($Name + '.log'))
+if ($LASTEXITCODE -ne 0) { throw 'Native console did not complete successfully; outputs are not accepted.' }
 if (-not (Test-Path -LiteralPath $env:CADAI_TEST_REPORT)) { throw 'No execution report' }
 Copy-Item -LiteralPath $env:CADAI_TEST_REPORT -Destination (Join-Path $output ($Name + '.native.json'))
 $extensions=@('.dwg','.dxf');if($PlotPdf){$extensions+=@('.pdf')}
@@ -70,4 +75,5 @@ foreach ($extension in $extensions) {
     if (-not (Test-Path -LiteralPath $file)) { throw "Reproduction failed: missing $extension" }
     Copy-Item -LiteralPath $file -Destination (Join-Path $output ($Name + $extension))
 }
+[ordered]@{plugin_sha256=$pluginHash;plan_sha256=(Get-FileHash -LiteralPath $Plan).Hash.ToLowerInvariant();helper_sha256=(Get-FileHash -LiteralPath (Join-Path $root 'tests\CadIntegrationTests.cs')).Hash.ToLowerInvariant();completed=$true} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output ($Name + '.execution.json')) -Encoding UTF8
 Write-Host "Saved reproduction: $output\$Name.dwg"

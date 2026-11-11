@@ -76,6 +76,7 @@
     <Compile Include="Services\CadDrawingExecutor.cs" />
     <Compile Include="Services\CadDrawingContext.cs" />
     <Compile Include="Services\PreparedCadPlan.cs" />
+    <Compile Include="Services\CadDimensionSizing.cs" />
     <Compile Include="Services\CadViewRefresh.cs" />
     <Compile Include="Services\CadExecutionReceipt.cs" />
     <Compile Include="Services\CadRevisionGuard.cs" />

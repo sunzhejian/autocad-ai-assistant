@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace AutoCAD.AI.Assistant.Services
 {
@@ -43,7 +44,11 @@ namespace AutoCAD.AI.Assistant.Services
                 for (var other = 0; other < r; other++)
                 {
                     foreach (var i in Edges(ring)) foreach (var j in Edges(rings[other]))
-                        if (Intersects(i[0], i[1], j[0], j[1], tolerance)) return "内孔与外边界或其他内孔相交/接触。";
+                        if (Intersects(i[0], i[1], j[0], j[1], tolerance))
+                            return "内孔与外边界或其他内孔相交/接触：内环 " + r + " 的边 " + Segment(i)
+                                + " 与" + (other == 0 ? "外环" : "内环 " + other) + "的边 " + Segment(j)
+                                + "。若源图是敞口、槽口或U形截面，应把缺口并入凹多边形外环，不得用贴住外环的 holes；"
+                                + "若是封闭孔，按源尺寸分离边界，不得删除孔洞或缩改尺寸来通过校验。";
                     if (other > 0 && (Inside(ring[0], rings[other]) || Inside(rings[other][0], ring))) return "内孔不得重叠或嵌套。";
                 }
                 if (!Inside(ring[0], rings[0])) return "内孔越出填充外边界。";
@@ -68,6 +73,9 @@ namespace AutoCAD.AI.Assistant.Services
         }
         private static IEnumerable<double[][]> Edges(List<double[]> points)
         { for (var i = 0; i < points.Count; i++) yield return new[] { points[i], points[(i + 1) % points.Count] }; }
+        private static string Segment(double[][] edge)
+        { return "[" + edge[0][0].ToString("G10", CultureInfo.InvariantCulture) + "," + edge[0][1].ToString("G10", CultureInfo.InvariantCulture)
+            + "]-[" + edge[1][0].ToString("G10", CultureInfo.InvariantCulture) + "," + edge[1][1].ToString("G10", CultureInfo.InvariantCulture) + "]"; }
         private static double Distance(double[] a, double[] b) { var x = b[0] - a[0]; var y = b[1] - a[1]; return Math.Sqrt(x * x + y * y); }
         private static double Cross(double[] a, double[] b, double[] c) { return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); }
         private static int Orientation(double[] a, double[] b, double[] c, double tolerance)

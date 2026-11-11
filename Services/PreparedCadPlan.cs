@@ -9,6 +9,7 @@ namespace AutoCAD.AI.Assistant.Services
     internal sealed class PreparedCadPlan
     {
         public string Json { get; private set; }
+        public Dictionary<string, double> FinalModelDimensionSizes { get; private set; }
         private Dictionary<string, object> _root;
         private int _claimed;
         private PreparedCadPlan() { }
@@ -16,11 +17,13 @@ namespace AutoCAD.AI.Assistant.Services
         {
             var error = CadPlanValidator.Validate(json);
             if (error != null) throw new InvalidOperationException("计划校验失败：" + error);
-            json = CadPlanNormalizer.Normalize(json);
+            bool modelDimensionLengths;
+            json = CadPlanNormalizer.Normalize(json, out modelDimensionLengths);
             error = CadPlanValidator.Validate(json);
             if (error != null) throw new InvalidOperationException("单位换算后校验失败：" + error);
-            return new PreparedCadPlan { Json = json, _root = (Dictionary<string, object>)new JavaScriptSerializer {
-                MaxJsonLength = 8 * 1024 * 1024 }.DeserializeObject(json) };
+            var root = (Dictionary<string, object>)new JavaScriptSerializer { MaxJsonLength = 8 * 1024 * 1024 }.DeserializeObject(json);
+            var sizes = CadDimensionSizing.Prepare((object[])root["commands"], modelDimensionLengths);
+            return new PreparedCadPlan { Json = json, _root = root, FinalModelDimensionSizes = sizes };
         }
         public Dictionary<string, object> Claim()
         {

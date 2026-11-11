@@ -28,3 +28,8 @@ jobs:
         run: |
           python -m pip install -r requirements-pdf.txt
           python -m unittest discover -s tests -p test_pdf_worker.py -v
+      - name: Validate source evaluator and fresh-run provenance without provider or CAD
+        shell: powershell
+        run: |
+          python -m pip install -r requirements-benchmark.txt
+          python -m unittest discover -s tests -p test_corpus_benchmark.py -v

@@ -155,6 +155,7 @@ public sealed class CadIntegrationTests
         VerifyRevisionGuard();
         VerifyPreviewSettings();
         VerifyRecorderLifecycle();
+        VerifyOpenChannelHatch();
         countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");
@@ -256,6 +257,28 @@ public sealed class CadIntegrationTests
         var rejected = false;
         try { type.GetMethod("Restore").Invoke(null, null); } catch (TargetInvocationException) { rejected = true; }
         Check(rejected, "malformed preview backup cannot modify unrelated system variables");
+    }
+
+    private static void VerifyOpenChannelHatch()
+    {
+        var before = Count();
+        var plan = "{\"commands\":[{\"type\":\"hatch\",\"layer\":\"U_SECTION_VERIFY\",\"points\":[[0,0],[10,0],[10,10],[8,10],[8,2],[2,2],[2,10],[0,10]]}]}";
+        var executed = Run(plan) != null;
+        var matches = 0;
+        var database = AcApplication.DocumentManager.MdiActiveDocument.Database;
+        using (var tr = database.TransactionManager.StartTransaction())
+        {
+            var table = (BlockTable)tr.GetObject(database.BlockTableId, OpenMode.ForRead);
+            var space = (BlockTableRecord)tr.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            foreach (ObjectId id in space)
+            {
+                var hatch = tr.GetObject(id, OpenMode.ForRead) as Hatch;
+                if (hatch != null && hatch.Layer == "U_SECTION_VERIFY" && hatch.NumberOfLoops == 1 && Math.Abs(hatch.Area - 52) < 1e-8)
+                    matches++;
+            }
+        }
+        Check(executed && Count() == before + 1 && matches == 1,
+            "open U-section uses one concave hatch boundary with actual area 52, not an invalid touching hole");
     }
 
     private static void VerifyRecorderLifecycle()

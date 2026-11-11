@@ -9,12 +9,21 @@ namespace AutoCAD.AI.Assistant.Services
     {
         public static string Normalize(string json)
         {
+            bool modelDimensionLengths;
+            return Normalize(json, out modelDimensionLengths);
+        }
+
+        public static string Normalize(string json, out bool modelDimensionLengths)
+        {
             var serializer = new JavaScriptSerializer { MaxJsonLength = 8 * 1024 * 1024 };
             var root = (Dictionary<string, object>)serializer.DeserializeObject(json);
+            modelDimensionLengths = root.ContainsKey("_dimensionLengthsInModelUnits") && root["_dimensionLengthsInModelUnits"] is bool && (bool)root["_dimensionLengthsInModelUnits"];
             if (!root.ContainsKey("coordinateUnit") || Convert.ToString(root["coordinateUnit"]) != "source") return json;
+            modelDimensionLengths = true;
             var factor = CadPlanQuality.UnitFactor(Convert.ToString(root["sourceUnit"]));
             Transform((object[])root["commands"], factor);
             root["coordinateUnit"] = "mm";
+            root["_dimensionLengthsInModelUnits"] = true;
             return serializer.Serialize(root);
         }
 

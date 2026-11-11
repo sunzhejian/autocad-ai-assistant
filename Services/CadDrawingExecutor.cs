@@ -94,6 +94,8 @@ namespace AutoCAD.AI.Assistant.Services
                         var unit = root.ContainsKey("sourceUnit") ? Convert.ToString(root["sourceUnit"]) : "mm";
                         PrepareDimensionUnits(commands, 1.0 / CadPlanQuality.UnitFactor(unit));
                         ExecuteCommands(commands, transaction, database, table, space, layerTable, layers, ref created, ref applied, errors, receipt, "");
+                        using (var finalStyle = database.GetDimstyleData())
+                            if (ApplyModelDimensionSizes(finalStyle, prepared.FinalModelDimensionSizes)) database.SetDimstyleData(finalStyle);
                         database.Insunits = UnitsValue.Millimeters;
                         receipt.Inspect(transaction);
                         created = receipt.ObjectCount;
@@ -917,7 +919,7 @@ namespace AutoCAD.AI.Assistant.Services
         {
             var dimension = new Point3AngularDimension(Point(command, "center"), Point(command, "p1"), Point(command, "p2"),
                 Point(command, "position"), Text(command, "text"), DimensionStyle(transaction, database));
-            dimension.Layer = layer; ConfigureDimension(dimension, database);
+            dimension.Layer = layer; ConfigureDimension(dimension, database, command);
             dimension.Dimaunit = 0; dimension.Dimadec = 2;
             ApplyProperties(dimension, command); MarkUncertain(dimension, command);
             AppendEntity(space, dimension); transaction.AddNewlyCreatedDBObject(dimension, true);
@@ -1165,7 +1167,7 @@ namespace AutoCAD.AI.Assistant.Services
             var rotation = Number(command, "rotation", 0) * Math.PI / 180.0;
             var dimension = new RotatedDimension(rotation, p1, p2, position, Text(command, "text"), DimensionStyle(transaction, database));
             dimension.Layer = layer;
-            ConfigureDimension(dimension, database);
+            ConfigureDimension(dimension, database, command);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
             AppendEntity(space, dimension);
@@ -1181,7 +1183,7 @@ namespace AutoCAD.AI.Assistant.Services
             var position = Point(command, "position");
             var dimension = new AlignedDimension(p1, p2, position, Text(command, "text"), DimensionStyle(transaction, database));
             dimension.Layer = layer;
-            ConfigureDimension(dimension, database);
+            ConfigureDimension(dimension, database, command);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
             AppendEntity(space, dimension);
@@ -1196,7 +1198,7 @@ namespace AutoCAD.AI.Assistant.Services
             var point = Point(command, "point");
             var dimension = new RadialDimension(center, point, Number(command, "leader", 10), Text(command, "text"), DimensionStyle(transaction, database));
             dimension.Layer = layer;
-            ConfigureDimension(dimension, database);
+            ConfigureDimension(dimension, database, command);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
             AppendEntity(space, dimension);
@@ -1212,7 +1214,7 @@ namespace AutoCAD.AI.Assistant.Services
             var opposite = center - (point - center);
             var dimension = new DiametricDimension(opposite, point, Number(command, "leader", 10), Text(command, "text"), DimensionStyle(transaction, database));
             dimension.Layer = layer;
-            ConfigureDimension(dimension, database);
+            ConfigureDimension(dimension, database, command);
             ApplyProperties(dimension, command);
             MarkUncertain(dimension, command);
             AppendEntity(space, dimension);
@@ -1220,9 +1222,34 @@ namespace AutoCAD.AI.Assistant.Services
             return 1;
         }
 
-        private static void ConfigureDimension(Dimension dimension, Database database)
+        private static void ConfigureDimension(Dimension dimension, Database database, Dictionary<string, object> command)
         {
-            using (var style = database.GetDimstyleData()) dimension.SetDimstyleData(style);
+            var sizes = command.ContainsKey("_modelDimensionSizes") ? command["_modelDimensionSizes"] as Dictionary<string, double> : null;
+            using (var style = database.GetDimstyleData())
+            {
+                if (ApplyModelDimensionSizes(style, sizes)) database.SetDimstyleData(style);
+                dimension.SetDimstyleData(style);
+            }
+        }
+
+        private static bool ApplyModelDimensionSizes(DimStyleTableRecord style, Dictionary<string, double> sizes)
+        {
+            var changed = false;
+            if (sizes == null) return changed;
+            foreach (var pair in sizes)
+            {
+                var value = CadDimensionSizing.PaperLength(pair.Value, style.Dimscale);
+                switch (pair.Key)
+                {
+                    case "DIMTXT": if (style.Dimtxt != value) { style.Dimtxt = value; changed = true; } break;
+                    case "DIMASZ": if (style.Dimasz != value) { style.Dimasz = value; changed = true; } break;
+                    case "DIMTSZ": if (style.Dimtsz != value) { style.Dimtsz = value; changed = true; } break;
+                    case "DIMEXO": if (style.Dimexo != value) { style.Dimexo = value; changed = true; } break;
+                    case "DIMEXE": if (style.Dimexe != value) { style.Dimexe = value; changed = true; } break;
+                    case "DIMGAP": if (style.Dimgap != value) { style.Dimgap = value; changed = true; } break;
+                }
+            }
+            return changed;
         }
 
         private static void MarkUncertain(Dimension dimension, Dictionary<string, object> command)

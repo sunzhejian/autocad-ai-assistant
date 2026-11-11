@@ -33,5 +33,5 @@ Copy-Item -LiteralPath $env:CADAI_TEST_REPORT -Destination (Join-Path $output 'r
 $report = Get-Content -LiteralPath $env:CADAI_TEST_REPORT -Raw -Encoding UTF8 | ConvertFrom-Json
 $checks = @($report | Where-Object { $null -ne $_.passed })
 $checks | Select-Object test,passed | Format-Table
-if ($checks.Count -ne 42 -or @($checks | Where-Object { -not $_.passed }).Count -gt 0 -or @($report | Where-Object { $_.error }).Count -gt 0) { throw "Native integration failed; see $log" }
+if ($checks.Count -ne 43 -or @($checks | Where-Object { -not $_.passed }).Count -gt 0 -or @($report | Where-Object { $_.error }).Count -gt 0) { throw "Native integration failed; see $log" }
 $report | Where-Object { $null -ne $_.milliseconds } | Format-Table
