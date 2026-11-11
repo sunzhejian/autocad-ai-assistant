@@ -59,6 +59,7 @@ namespace AutoCAD.AI.Assistant.Services
             ValidateCommands(commands, new HashSet<string>(StringComparer.OrdinalIgnoreCase), errors, "", 0, ref remaining);
             if (errors.Count == 0) errors.AddRange(CadPlanQuality.DimensionErrors(root));
             if (errors.Count == 0) errors.AddRange(CadPlanQuality.MaterialLeaderErrors(commands, ""));
+            if (errors.Count == 0) errors.AddRange(CadGeometryReferences.Errors(root));
         }
 
         private static void ValidateCommands(object[] commands, HashSet<string> definedBlocks, List<string> errors,

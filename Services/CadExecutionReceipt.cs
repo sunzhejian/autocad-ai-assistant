@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
 
 namespace AutoCAD.AI.Assistant.Services
 {
@@ -46,6 +47,7 @@ namespace AutoCAD.AI.Assistant.Services
                         { "layer", entity.Layer }, { "space", owner.Name }
                     };
                     var command = _commands[pair.Value];
+                    if (command.ContainsKey("id")) record["geometry_id"] = CadGeometryReferences.Id(command["id"]);
                     var dimension = entity as Dimension;
                     if (dimension != null)
                     {
@@ -61,6 +63,8 @@ namespace AutoCAD.AI.Assistant.Services
                         record["measurement"] = actual; record["unit_factor"] = dimension.Dimlfac;
                         record["text"] = dimension.DimensionText;
                         record["dimension_scale"] = dimension.Dimscale;
+                        if (command.ContainsKey("reference"))
+                            InspectReference(transaction, dimension, pair.Value, command, record);
                         var sizes = command.ContainsKey("_modelDimensionSizes") ? command["_modelDimensionSizes"] as Dictionary<string, double> : null;
                         if (sizes != null)
                         {
@@ -126,6 +130,66 @@ namespace AutoCAD.AI.Assistant.Services
                 if ((type.StartsWith("dim", StringComparison.Ordinal) || type == "hatch") && !checkedPaths.Contains(pair.Key))
                     throw new InvalidOperationException("原生结果缺少标注或填充：第 " + pair.Key + " 条。");
             }
+        }
+
+        private static string Scope(string path)
+        {
+            var dot = path.LastIndexOf('.');
+            return dot < 0 ? "" : path.Substring(0, dot + 1);
+        }
+
+        private void InspectReference(Transaction transaction, Dimension dimension, string path,
+            Dictionary<string, object> command, Dictionary<string, object> record)
+        {
+            var reference = CadGeometryReferences.Id(command["reference"]);
+            string targetPath = null;
+            Dictionary<string, object> targetCommand = null;
+            foreach (var pair in _commands)
+            {
+                if (Scope(pair.Key) != Scope(path) || !pair.Value.ContainsKey("id")
+                    || CadGeometryReferences.Id(pair.Value["id"]) != reference) continue;
+                if (targetPath != null) throw new InvalidOperationException("原生引用的几何id重复：" + reference);
+                targetPath = pair.Key; targetCommand = pair.Value;
+            }
+            if (reference == null || targetPath == null)
+                throw new InvalidOperationException("原生结果找不到同一作用域的引用几何：" + reference);
+            var tolerance = CadGeometryReferences.NativeTolerance(targetCommand);
+            var rotated = dimension as RotatedDimension;
+            var aligned = dimension as AlignedDimension;
+            if (rotated == null && aligned == null)
+                throw new InvalidOperationException("原生几何引用仅支持线性/对齐标注。");
+            var endpoints = rotated != null ? new[] { rotated.XLine1Point, rotated.XLine2Point }
+                : new[] { aligned.XLine1Point, aligned.XLine2Point };
+            var curves = new List<Curve>();
+            var handles = new List<string>();
+            foreach (var pair in _objects)
+            {
+                if (pair.Value != targetPath || pair.Key.IsErased || !pair.Key.IsValid) continue;
+                var curve = transaction.GetObject(pair.Key, OpenMode.ForRead) as Curve;
+                if (curve == null || curve.OwnerId != dimension.OwnerId) continue;
+                // Supported references are actual simple curves, never dimension blocks
+                // or generated hatch ornaments that happen to pass through the points.
+                if (!(curve is Line) && !(curve is Polyline) && !(curve is Circle)) continue;
+                curves.Add(curve); handles.Add(curve.Handle.ToString());
+            }
+            if (curves.Count == 0) throw new InvalidOperationException("原生引用目标未生成同一空间中的可核对曲线：" + reference);
+            var distances = new List<double>();
+            foreach (var point in endpoints)
+            {
+                var distance = Double.MaxValue;
+                foreach (var curve in curves)
+                    distance = Math.Min(distance, point.DistanceTo(curve.GetClosestPointTo(point, false)));
+                if (Double.IsNaN(distance) || Double.IsInfinity(distance) || distance > tolerance)
+                    throw new InvalidOperationException("原生标注端点不在引用几何 '" + reference + "' 上，距离mm=" + distance);
+                distances.Add(distance);
+            }
+            record["geometry_reference"] = reference;
+            record["reference_command"] = targetPath;
+            record["reference_handles"] = handles;
+            record["reference_endpoint_distances_mm"] = distances;
+            record["reference_tolerance_mm"] = tolerance;
+            record["reference_checked_at_execution"] = true;
+            record["persistent_association_created"] = false;
         }
         private static double Area(object[] points)
         {

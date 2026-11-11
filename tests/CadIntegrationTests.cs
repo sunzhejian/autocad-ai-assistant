@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Web.Script.Serialization;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
 using AcApplication = Autodesk.AutoCAD.ApplicationServices.Application;
 
 [assembly: CommandClass(typeof(CadIntegrationTests))]
@@ -156,6 +157,7 @@ public sealed class CadIntegrationTests
         VerifyPreviewSettings();
         VerifyRecorderLifecycle();
         VerifyOpenChannelHatch();
+        VerifyGeometryReferences();
         countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");
@@ -163,6 +165,75 @@ public sealed class CadIntegrationTests
         Check(Run("{\"commands\":[" + string.Join(",", commands.ToArray()) + "]}") != null && Count() == countBeforeFailure + 400, "400 command native batch");
         Results.Add(new { test = "400 command execution", milliseconds = timer.ElapsedMilliseconds });
         Save();
+    }
+
+    private static void VerifyGeometryReferences()
+    {
+        var geometry = "{\"type\":\"rect\",\"id\":\"opening\",\"p1\":[150,150],\"p2\":[850,950]}";
+        var dimension = "{\"type\":\"dimlinear\",\"reference\":\"opening\",\"p1\":[850,300],\"p2\":[850,800],\"position\":[1050,550],\"rotation\":90,\"value\":500}";
+        var header = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[";
+        Check(Run(header + geometry + "," + dimension + "]}") != null,
+            "referenced cm dimension uses the actual native inner contour including mid-edge points");
+        var receipt = (Dictionary<string, object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(LastReceipt));
+        var checkedReference = false;
+        foreach (var item in (object[])receipt["objects"])
+        {
+            var record = (Dictionary<string, object>)item;
+            if (!record.ContainsKey("geometry_reference")) continue;
+            var distances = (object[])record["reference_endpoint_distances_mm"];
+            checkedReference = Convert.ToString(record["reference_command"]) == "1"
+                && Convert.ToBoolean(record["reference_checked_at_execution"])
+                && !Convert.ToBoolean(record["persistent_association_created"])
+                && Convert.ToDouble(distances[0]) < 1e-8 && Convert.ToDouble(distances[1]) < 1e-8;
+        }
+        Check(checkedReference && !Convert.ToBoolean(receipt["source_accuracy_verified"]),
+            "receipt records native endpoint distances without claiming persistent association or source accuracy");
+        var before = Count();
+        Check(Run(header + geometry + "," + dimension.Replace("[850,300]", "[1000,300]").Replace("[850,800]", "[1000,800]") + "]}") == null
+            && Count() == before, "correct reading on the wrong contour is rejected before creating any native entities");
+        var body = geometry + "," + dimension;
+        Check(Run("{\"commands\":[{\"type\":\"block\",\"name\":\"ref_local_a\",\"commands\":[" + body
+            + "]},{\"type\":\"block\",\"name\":\"ref_local_b\",\"commands\":[" + body + "]}]}") != null
+            && File.ReadAllText(LastReceipt).Contains("\"reference_command\":\"2.1\""),
+            "native references remain local to each named block when geometry IDs repeat in different blocks");
+        Check(Run("{\"commands\":[{\"type\":\"circle\",\"id\":\"c\",\"center\":[0,0],\"radius\":20},"
+            + "{\"type\":\"dimaligned\",\"reference\":\"c\",\"p1\":[-20,0],\"p2\":[20,0],\"position\":[0,-30],\"value\":40}]}") != null,
+            "native circle chord checks the circumference rather than its center");
+        Check(Run("{\"commands\":[{\"type\":\"line\",\"id\":\"chain\",\"points\":[[0,0],[40,0],[40,30]]},"
+            + "{\"type\":\"dimaligned\",\"reference\":\"chain\",\"p1\":[0,0],\"p2\":[40,30],\"position\":[-10,20],\"value\":50}]}") != null,
+            "one reference can resolve the multiple actual line segments created by a line command");
+        VerifyNativeReferenceMismatch();
+    }
+
+    private static void VerifyNativeReferenceMismatch()
+    {
+        var db = AcApplication.DocumentManager.MdiActiveDocument.Database;
+        var type = Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL"))
+            .GetType("AutoCAD.AI.Assistant.Services.CadExecutionReceipt", true);
+        var record = type.GetMethod("Record", BindingFlags.Static | BindingFlags.NonPublic);
+        var geometry = (Dictionary<string, object>)new JavaScriptSerializer().DeserializeObject(
+            "{\"type\":\"line\",\"id\":\"edge\",\"points\":[[0,0],[40,0]]}");
+        var dimension = (Dictionary<string, object>)new JavaScriptSerializer().DeserializeObject(
+            "{\"type\":\"dimlinear\",\"reference\":\"edge\",\"p1\":[0,0],\"p2\":[40,0],\"position\":[0,-10],\"value\":40}");
+        var before = Count(); var rejected = false;
+        using (var receipt = (IDisposable)Activator.CreateInstance(type, new object[] { db }))
+        using (var tr = db.TransactionManager.StartTransaction())
+        {
+            var table = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            var space = (BlockTableRecord)tr.GetObject(table[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+            type.GetMethod("Begin").Invoke(receipt, new object[] { "1", geometry });
+            // Deliberately diverge actual geometry from its valid plan, to prove this
+            // check reads native entities rather than just repeating JSON preflight.
+            var line = new Line(new Point3d(0, 5, 0), new Point3d(40, 5, 0));
+            space.AppendEntity(line); tr.AddNewlyCreatedDBObject(line, true); record.Invoke(null, new object[] { line });
+            type.GetMethod("Begin").Invoke(receipt, new object[] { "2", dimension });
+            var dim = new RotatedDimension(0, Point3d.Origin, new Point3d(40, 0, 0), new Point3d(0, -10, 0), "", db.Dimstyle);
+            space.AppendEntity(dim); tr.AddNewlyCreatedDBObject(dim, true); record.Invoke(null, new object[] { dim });
+            try { type.GetMethod("Inspect").Invoke(receipt, new object[] { tr }); }
+            catch (TargetInvocationException ex) { rejected = ex.InnerException.Message.Contains("原生标注端点"); }
+        }
+        Check(rejected, "native inspection rejects a generated target that diverges from the valid plan");
+        Check(Count() == before, "failed native geometry relationship leaves no partial entities after transaction rollback");
     }
 
     private static void VerifyNewFeatures()

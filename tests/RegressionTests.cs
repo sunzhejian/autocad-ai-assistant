@@ -43,6 +43,8 @@ internal static class RegressionTests
             TestValidation();
             TestPreparedPlan();
             TestDimensionSizeSemantics();
+            TestGeometryReferences();
+            TestReferenceRepair().GetAwaiter().GetResult();
             TestImageLinetypes();
             TestDimensionFormatVariables();
             TestNewDrawingFeatures();
@@ -312,6 +314,93 @@ internal static class RegressionTests
         var lines = File.ReadAllLines(DiagnosticsLog.FilePath);
         Check(lines.Length == 1000 && lines[lines.Length - 1].Contains("buffer-1199"), "bounded log batch retries after the file becomes writable");
         Check(!DiagnosticsLog.Snapshot().Contains("buffer-0") && DiagnosticsLog.Snapshot().Contains("buffer-1199"), "diagnostic snapshot retains only recent messages");
+    }
+
+    private static void TestGeometryReferences()
+    {
+        var outer = "{\"type\":\"rect\",\"id\":\"outer\",\"p1\":[0,0],\"p2\":[1000,1100]}";
+        var hole = "{\"type\":\"rect\",\"id\":\"opening\",\"p1\":[150,150],\"p2\":[850,950]}";
+        var dimension = "{\"type\":\"dimlinear\",\"reference\":\"opening\",\"p1\":[850,150],\"p2\":[850,950],\"rotation\":90,\"position\":[1050,550],\"value\":800}";
+        var plan = Plan(outer + "," + hole + "," + dimension);
+        Check(CadPlanValidator.Validate(plan) == null,"dimension reference binds to the actual inner contour");
+        Check(CadPlanValidator.Validate(plan.Replace("\"dimlinear\"", "\"dim\"")) == null,
+            "legacy dim alias keeps the same linear reference semantics");
+        var wrong = Plan(outer + "," + hole + "," + dimension.Replace("[850,150]","[1000,150]").Replace("[850,950]","[1000,950]"));
+        var error = CadPlanValidator.Validate(wrong);
+        Check(error != null && error.Contains("opening") && error.Contains("p1"),
+            "correct 800 reading on the outer wall cannot pass as an inner-contour reference");
+        Check(CadPlanValidator.Validate(Plan(outer + "," + hole + "," + dimension.Replace("[850,150]","[850,300]").Replace("[850,950]","[850,800]").Replace(":800",":500"))) == null,
+            "valid mid-edge extension points are not incorrectly forced to rectangle corners");
+        Check(CadPlanValidator.Validate(plan.Replace("\"opening\",\"p1\":[850","\"missing\",\"p1\":[850")) != null,
+            "unknown geometry reference cannot silently bind to another outline");
+        Check(CadPlanValidator.Validate(Plan(hole + "," + hole + "," + dimension)) != null,
+            "ambiguous duplicate geometry IDs are rejected");
+        Check(CadPlanValidator.Validate(Plan(outer.Replace("\"id\":\"outer\"","\"id\":42"))) == null,
+            "legacy unreferenced metadata does not change geometric execution");
+        var block = "{\"type\":\"block\",\"name\":\"local\",\"commands\":[" + hole + "," + dimension + "]}";
+        Check(CadPlanValidator.Validate(Plan(hole + "," + block)) == null,
+            "geometry IDs are local to the current block scope");
+        Check(CadPlanValidator.Validate(Plan(hole + ",{\"type\":\"block\",\"name\":\"other\",\"commands\":[" + dimension + "]}")) != null,
+            "dimension references do not guess across block scopes");
+        var source = plan.Replace("{\"commands\":","{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":");
+        Check(CadPlanValidator.Validate(source) == null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(source)) == null,
+            "reference IDs and endpoint relations survive source-unit normalization");
+        var offset = Plan(outer + "," + hole + "," + dimension.Replace("[850,150]","[850.00005,150]").Replace("[850,950]","[850.00005,950]"));
+        offset = offset.Replace("{\"commands\":","{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":");
+        Check(CadPlanValidator.Validate(offset) == null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(offset)) == null,
+            "reference tolerance is a physical 0.001 mm before and after cm normalization");
+        var circle = "{\"type\":\"circle\",\"id\":\"c\",\"center\":[0,0],\"radius\":20}";
+        var chord = "{\"type\":\"dimaligned\",\"reference\":\"c\",\"p1\":[-20,0],\"p2\":[20,0],\"position\":[0,-30],\"value\":40}";
+        Check(CadPlanValidator.Validate(Plan(circle + "," + chord)) == null,"linear references can use actual circle boundary points");
+        Check(CadPlanValidator.Validate(Plan(circle + "," + chord.Replace("[-20,0]","[0,0]").Replace(":40",":20"))) != null,
+            "circle center is not mistaken for its boundary");
+        var curve = "{\"type\":\"polyline\",\"id\":\"c\",\"points\":[[-20,0],[20,0]],\"bulges\":[1,0]}";
+        Check(CadPlanValidator.Validate(Plan(curve + "," + chord)) != null,
+            "unimplemented arc references cannot pass by testing only the chord");
+        Check(CadPlanValidator.Validate(plan.Replace("[150,150]","[150,150,10]")) != null,
+            "3D geometry is not certified by an XY-only reference check");
+        Check(CadPlanValidator.Validate(Plan(hole + "," + dimension.Replace("\"opening\"", "42"))) != null,
+            "non-string dimension references are rejected rather than coerced to IDs");
+        Check(CadPlanValidator.Validate(Plan(circle + ",{\"type\":\"dimradius\",\"reference\":\"c\",\"center\":[0,0],\"point\":[20,0],\"value\":20}")) != null,
+            "unimplemented radial reference is reported explicitly instead of being marked checked");
+        var line = "{\"type\":\"line\",\"id\":\"edge\",\"points\":[[0,0],[20,0]]}";
+        var past = "{\"type\":\"dimlinear\",\"reference\":\"edge\",\"p1\":[30,0],\"p2\":[50,0],\"position\":[30,-10],\"value\":20}";
+        Check(CadPlanValidator.Validate(Plan(line + "," + past)) != null,
+            "extension of a finite line is not its actual reference boundary");
+        var meter = Plan(outer + "," + hole + "," + dimension.Replace("[850,150]","[850.000002,150]"));
+        meter = meter.Replace("{\"commands\":", "{\"sourceUnit\":\"m\",\"coordinateUnit\":\"source\",\"commands\":");
+        Check(CadPlanValidator.Validate(meter) != null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(meter)) != null,
+            "meter source units do not accidentally enlarge the reference tolerance by 1000");
+    }
+
+    private static async Task TestReferenceRepair()
+    {
+        var geometry = "{\"type\":\"rect\",\"id\":\"opening\",\"p1\":[150,150],\"p2\":[850,950]}";
+        var dimension = "{\"type\":\"dimlinear\",\"reference\":\"opening\",\"p1\":[850,150],\"p2\":[850,950],\"rotation\":90,\"position\":[1050,550],\"value\":800}";
+        var valid = Plan(geometry + "," + dimension);
+        var invalid = Plan(geometry + "," + dimension.Replace("[850,150]","[1000,150]").Replace("[850,950]","[1000,950]"));
+        using (var server = new Server())
+        {
+            server.Response = i => Tuple.Create(200, Reply(i == 1 ? invalid : valid));
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(Model(server), History(), "", null);
+            Check(server.Requests.Count == 2 && server.Requests[1].Contains("opening")
+                && server.Requests[1].Contains("p1") && CadPlanText.Extract(answer) == valid,
+                "one AI repair receives the exact wrong-contour evidence and retains reference coverage");
+        }
+        using (var server = new Server())
+        {
+            server.Response = i => Tuple.Create(200, Reply(i == 1 ? invalid : invalid.Replace("\"reference\":\"opening\",", "")));
+            try { await new OpenAiCompatibleClient().CompleteAsync(Model(server), History(), "", null); Check(false, "removed reference"); }
+            catch (InvalidOperationException ex) { Check(server.Requests.Count == 2 && ex.Message.Contains("删除"),
+                "repair cannot hide wrong-contour evidence by silently deleting its reference"); }
+        }
+        Check(CadGeometryReferences.RepairCoverageError(invalid, valid.Replace("opening", "corrected-opening")) == null,
+            "repair can correct the referenced target ID without retaining an initially wrong ID");
+        var before = "{\"commands\":[{\"type\":\"block\",\"name\":\"section\",\"commands\":[" + geometry + "," + dimension + "]}]}";
+        Check(CadGeometryReferences.RepairCoverageError(before, valid) != null,
+            "repair cannot replace a block-local checked dimension with unrelated model-space coverage");
+        Check(CadGeometryReferences.RepairCoverageError("{broken", valid) == null,
+            "unreadable JSON can still receive its single syntax repair");
     }
 
     private static void TestDimensionSizeSemantics()

@@ -27,6 +27,7 @@ namespace AutoCAD.AI.Assistant.Services
             "hatch{points,holes,material,spacing,pattern,scale,angle}（holes为内孔多边形数组。材料优先material:riprap块石/gravel碎石/sand砂/earth土/clay粘土/concrete混凝土，自动按当前DIMSCALE控制纸面疏密；spacing可选，指定源坐标单位下的纹理大小；不要用几块孤立多边形代替整个石材区域填充。材料填充与文字、引线分开，保留层间边界与内孔）；dimlinear{p1,p2,position,rotation}；dimaligned{p1,p2,position}；" +
             "填充拓扑：U形、槽形或向外敞开的空白是外轮廓的凹缺口，应沿真实边界顺序写成一个凹多边形points；holes仅用于完全位于外环内部且不接触外环的封闭孔洞。多视图、相邻构件分别创建填充，不用相互接触或重叠的内孔拼接。保留源尺寸和实际开口，不删除孔洞、不缩小孔洞来规避校验。" +
             "dimradius{center,point}；dimdiameter{center,point}；block{name,commands}；insert{name,position,rotation,scale}；setvar{name,value}；" +
+            "尺寸几何引用：可给line/rect/polyline（直边）/circle增加稳定id；dimlinear/dimaligned可加reference引用同一作用域内实际被测轮廓的id，p1/p2必须在该轮廓上，合法边中点可用。图片中能定位轮廓的线性尺寸优先声明reference；内孔尺寸引用内孔轮廓，不挂在外墙上。id在块内局部唯一；不跨块、不引用含bulges圆弧多段线或hatch，不为通过检查虚构辅助轮廓。只验证本次落图，非持久关联约束。" +
             "standard{}（建标准图层+仿宋+SL73标注）；frame{size,title,scale,number,company,date,origin}（A0–A4 图框+标题栏，原点0,0；scale 为出图比例如 1:100，执行器按该比例整体放大图框/标题栏/字高，并自动设置 DIMSCALE 与 LTSCALE）。" +
             "规则：含块内部共≤400条；连续折线优先polyline，重复构件用block+insert，勿凑指令数。完整图纸先standard再frame；局部截图不加图框。frame固定按纸面mm生成；源单位坐标布局时，图框宽高/内框边距/字高需除以源单位毫米系数（cm为10，m为1000），避开右下标题栏。尺寸优先于像素比例；从基准和尺寸链计算坐标，保证投影对应和对称；剖面用hatch、图名说明用text。每条图片尺寸标注附value（源图读数）、confidence:read/inferred/unknown；模糊尺寸不得冒充read。source坐标模式下，dimlinear的value须等于端点在rotation方向投影长度，dimaligned为实际距离；dimdiameter的point是圆周点。text只可用<>或<>（估），不可覆盖测量值。无需复述题面。1:100字高为350mm，若sourceUnit=cm则height=35。" +
             "复刻以源图外观为准，不以通用规范替换图中实际符号。先在内部核对每个视图的外形/内孔/尺寸端点/中心线/图名和下划线数量，再输出完整计划。图名按相对图幅大小取字高，不要把图名放大到接近内孔高度，不自行添加源图没有的双下划线。" +
@@ -187,6 +188,7 @@ namespace AutoCAD.AI.Assistant.Services
             }
             catch (Exception ex) { error = ex.Message; }
             if (error == null) return answer;
+            var originalPlan = plan;
             if (plan != null) DiagnosticsLog.SavePlan(plan);
             if (progress != null) progress("尺寸或计划校验未通过，正在修正一次…");
             DiagnosticsLog.Write("计划自动修正：" + error);
@@ -198,6 +200,7 @@ namespace AutoCAD.AI.Assistant.Services
             var repaired = ExtractContent(response.json);
             plan = CadPlanText.Extract(repaired);
             error = plan == null ? "修正后缺少绘图计划。" : ValidatePlan(plan, image);
+            if (error == null && originalPlan != null) error = CadGeometryReferences.RepairCoverageError(originalPlan, plan);
             if (error != null) { if (plan != null) DiagnosticsLog.SavePlan(plan); throw new InvalidOperationException("修正后校验仍未通过，未执行：" + error); }
             return repaired;
         }
