@@ -177,6 +177,73 @@ def reasoning_unavailable(result, effort):
             any(term in error for term in ['unsupported value','supported values','unsupported parameter','not supported','does not support','不支持']))
 
 
+def native_receipt(folder, name, proof, plan):
+    """Bind durable native evidence to this execution; never infer source accuracy."""
+    folder = Path(folder)
+    hashes = proof.get('output_sha256')
+    required = {'.dwg', '.dxf', '.receipt.json'}
+    if proof.get('schema') != 2 or not isinstance(hashes, dict) or not required <= hashes.keys():
+        raise ValueError('Native manifest is missing durable output hashes')
+    for suffix, expected in hashes.items():
+        if suffix not in required | {'.pdf'}:
+            raise ValueError('Unexpected native output suffix')
+        if digest(folder / (name + suffix)) != expected:
+            raise ValueError('Native output changed: ' + suffix)
+    receipt = read(folder / (name + '.receipt.json'))
+    if receipt.get('native_checks_passed') is not True or receipt.get('source_accuracy_verified') is not False:
+        raise ValueError('Native receipt scope is invalid')
+    prepared_hash = receipt.get('plan_sha256')
+    if not isinstance(prepared_hash, str) or len(prepared_hash) != 64 or any(c not in '0123456789abcdef' for c in prepared_hash) or prepared_hash != proof.get('receipt_plan_sha256'):
+        raise ValueError('Prepared plan receipt identity mismatch')
+
+    def walk(commands, prefix=''):
+        for number, command in enumerate(commands, 1):
+            path = prefix + str(number)
+            yield path, command
+            if command['type'].lower() == 'block':
+                yield from walk(command['commands'], path + '.')
+
+    all_commands = dict(walk(plan['commands']))
+    linear = {path: command for path, command in all_commands.items()
+              if command['type'].lower() in {'dim', 'dimlinear', 'dimaligned'}}
+    requested = {path: command['reference'].strip() for path, command in linear.items() if 'reference' in command}
+    observed = {}
+    maximum_distance = None
+    for record in receipt['objects']:
+        if 'geometry_reference' not in record:
+            continue
+        path = record['command']
+        if path in observed or requested.get(path) != record['geometry_reference']:
+            raise ValueError('Native reference command or target differs from the actual plan')
+        scope = path.rpartition('.')[0]
+        targets = [target for target, command in all_commands.items()
+                   if target.rpartition('.')[0] == scope and isinstance(command.get('id'), str)
+                   and command['id'].strip() == requested[path]]
+        if len(targets) != 1 or record.get('reference_command') != targets[0]:
+            raise ValueError('Native reference resolved to a different command scope')
+        actual_handles = {item['handle'] for item in receipt['objects']
+                          if item.get('command') == targets[0] and item.get('type') in {'Line','Polyline','Circle'}
+                          and item.get('space') == record.get('space') and item.get('handle')}
+        if record.get('reference_checked_at_execution') is not True or record.get('persistent_association_created') is not False:
+            raise ValueError('Native reference state is invalid')
+        distances, tolerance = record.get('reference_endpoint_distances_mm'), record.get('reference_tolerance_mm')
+        finite_number = lambda value: type(value) in (int, float) and math.isfinite(value)
+        if not finite_number(tolerance) or tolerance <= 0 or not isinstance(distances, list) or len(distances) != 2:
+            raise ValueError('Native reference distances or tolerance are missing')
+        if not all(finite_number(value) and 0 <= value <= tolerance for value in distances):
+            raise ValueError('Native reference endpoint is outside its recorded tolerance')
+        if record.get('type') not in {'RotatedDimension','AlignedDimension'} or not actual_handles or set(record.get('reference_handles') or []) != actual_handles:
+            raise ValueError('Native reference has no matching actual target handles')
+        observed[path] = record['geometry_reference']
+        maximum_distance = max(distances + ([maximum_distance] if maximum_distance is not None else []))
+    if observed != requested:
+        raise ValueError('Native receipt omitted a declared geometry reference')
+    return {'receipt_sha256': hashes['.receipt.json'], 'linear_dimensions': len(linear),
+            'referenced_dimensions': len(requested), 'native_references_checked': len(observed),
+            'max_reference_endpoint_distance_mm': maximum_distance,
+            'persistent_association_created': False, 'source_accuracy_verified': False}
+
+
 def native_preflight(run, plugin, identity, env):
     folder = run / 'runtime' / 'preflight'
     folder.mkdir()
@@ -191,11 +258,12 @@ def native_preflight(run, plugin, identity, env):
     proof = read(folder / 'probe.execution.json')
     if proof.get('plugin_sha256') != identity['plugin_sha256'] or proof.get('plan_sha256') != digest(plan):
         raise ValueError('Preflight plugin/plan identity mismatch')
+    receipt = native_receipt(folder, 'probe', proof, read(plan))
     doc = ezdxf.readfile(folder / 'probe.dxf')
     circles = list(doc.modelspace().query('CIRCLE'))
     if len(circles) != 1 or abs(circles[0].dxf.radius - 1) > 1e-8 or doc.header.get('$INSUNITS') != 4:
         raise ValueError('Preflight actual geometry did not match its fixed probe')
-    return {'passed': True, 'seconds': seconds, **proof}
+    return {'passed': True, 'seconds': seconds, 'native_receipt': receipt, **proof}
 
 
 def trial(case, number, prepared, run, plugin, helper, identity, env):
@@ -256,6 +324,7 @@ def trial(case, number, prepared, run, plugin, helper, identity, env):
             raise ValueError('Native execution identity mismatch')
         if proof.get('helper_sha256') != identity['native_tools']['tests/CadIntegrationTests.cs']:
             raise ValueError('Native helper changed during execution')
+        result['native_receipt'] = native_receipt(native, 'drawing', proof, read(plan))
         records = read(native / 'drawing.native.json')
         if any(r.get('error') or r.get('passed') is False or r.get('result') is False for r in records):
             raise ValueError('Native checks rejected this plan')

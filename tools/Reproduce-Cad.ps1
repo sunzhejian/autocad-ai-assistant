@@ -18,9 +18,13 @@ $env:CADAI_TEST_REPORT = Join-Path $scratch 'report.json'
 $env:CADAI_REPRO_PLAN = Join-Path $scratch 'plan.json'
 $env:CADAI_REPRO_OUTPUT = Join-Path $scratch $Name
 Copy-Item -LiteralPath $Plan -Destination $env:CADAI_REPRO_PLAN
+$inputPlanHash = (Get-FileHash -LiteralPath $env:CADAI_REPRO_PLAN).Hash.ToLowerInvariant()
 $testDll = Join-Path $scratch 'CadIntegrationTests.dll'
+$helperSource = Join-Path $scratch 'CadIntegrationTests.cs'
+Copy-Item -LiteralPath (Join-Path $root 'tests\CadIntegrationTests.cs') -Destination $helperSource
+$helperHash = (Get-FileHash -LiteralPath $helperSource).Hash.ToLowerInvariant()
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-& $compiler /nologo /target:library /r:System.Web.Extensions.dll "/r:$AutoCADPath\acmgd.dll" "/r:$AutoCADPath\acdbmgd.dll" "/r:$AutoCADPath\accoremgd.dll" "/out:$testDll" (Join-Path $root 'tests\CadIntegrationTests.cs')
+& $compiler /nologo /target:library /r:System.Web.Extensions.dll "/r:$AutoCADPath\acmgd.dll" "/r:$AutoCADPath\acdbmgd.dll" "/r:$AutoCADPath\accoremgd.dll" "/out:$testDll" $helperSource
 if ($LASTEXITCODE -ne 0) { throw 'Integration helper build failed' }
 $plotCommands=@()
 if($PlotPdf){
@@ -68,12 +72,24 @@ $lines | Set-Content -LiteralPath $script -Encoding ASCII
 & python (Join-Path $PSScriptRoot 'run_console.py') (Join-Path $AutoCADPath 'accoreconsole.exe') $script (Join-Path $output ($Name + '.log'))
 if ($LASTEXITCODE -ne 0) { throw 'Native console did not complete successfully; outputs are not accepted.' }
 if (-not (Test-Path -LiteralPath $env:CADAI_TEST_REPORT)) { throw 'No execution report' }
+$nativeReport = Get-Content -LiteralPath $env:CADAI_TEST_REPORT -Raw -Encoding UTF8 | ConvertFrom-Json
+if (@($nativeReport | Where-Object { $_.error -or $_.passed -eq $false -or $_.result -eq $false }).Count -gt 0) { throw 'Native report rejected this reproduction.' }
+$receipts = @($nativeReport | Where-Object { $_.receipt_path })
+if ($receipts.Count -ne 1 -or -not (Test-Path -LiteralPath $receipts[0].receipt_path -PathType Leaf)) { throw 'Exactly one native receipt is required.' }
+$receipt = Get-Content -LiteralPath $receipts[0].receipt_path -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($receipt.native_checks_passed -ne $true -or $receipt.source_accuracy_verified -ne $false) { throw 'Native receipt has an invalid verification scope.' }
+if ((Get-FileHash -LiteralPath $Plan).Hash.ToLowerInvariant() -ne $inputPlanHash) { throw 'Input plan changed during native execution.' }
 Copy-Item -LiteralPath $env:CADAI_TEST_REPORT -Destination (Join-Path $output ($Name + '.native.json'))
+Copy-Item -LiteralPath $receipts[0].receipt_path -Destination (Join-Path $output ($Name + '.receipt.json'))
 $extensions=@('.dwg','.dxf');if($PlotPdf){$extensions+=@('.pdf')}
 foreach ($extension in $extensions) {
     $file = $env:CADAI_REPRO_OUTPUT + $extension
     if (-not (Test-Path -LiteralPath $file)) { throw "Reproduction failed: missing $extension" }
     Copy-Item -LiteralPath $file -Destination (Join-Path $output ($Name + $extension))
 }
-[ordered]@{plugin_sha256=$pluginHash;plan_sha256=(Get-FileHash -LiteralPath $Plan).Hash.ToLowerInvariant();helper_sha256=(Get-FileHash -LiteralPath (Join-Path $root 'tests\CadIntegrationTests.cs')).Hash.ToLowerInvariant();completed=$true} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output ($Name + '.execution.json')) -Encoding UTF8
+$hashes = [ordered]@{}
+foreach ($extension in @($extensions) + '.receipt.json') {
+    $hashes[$extension] = (Get-FileHash -LiteralPath (Join-Path $output ($Name + $extension))).Hash.ToLowerInvariant()
+}
+[ordered]@{schema=2;plugin_sha256=$pluginHash;plan_sha256=$inputPlanHash;helper_sha256=$helperHash;receipt_plan_sha256=$receipt.plan_sha256;output_sha256=$hashes;completed=$true} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $output ($Name + '.execution.json')) -Encoding UTF8
 Write-Host "Saved reproduction: $output\$Name.dwg"

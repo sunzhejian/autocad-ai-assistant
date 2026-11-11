@@ -158,6 +158,7 @@ public sealed class CadIntegrationTests
         VerifyRecorderLifecycle();
         VerifyOpenChannelHatch();
         VerifyGeometryReferences();
+        VerifyPlanBudget();
         countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");
@@ -165,6 +166,21 @@ public sealed class CadIntegrationTests
         Check(Run("{\"commands\":[" + string.Join(",", commands.ToArray()) + "]}") != null && Count() == countBeforeFailure + 400, "400 command native batch");
         Results.Add(new { test = "400 command execution", milliseconds = timer.ElapsedMilliseconds });
         Save();
+    }
+
+    private static void VerifyPlanBudget()
+    {
+        var before = Count();
+        var db = AcApplication.DocumentManager.MdiActiveDocument.Database;
+        var previousUnits = db.Insunits;
+        var previousScale = db.Dimscale;
+        var points = new List<int[]>();
+        for (var i = 0; i < 6002; i++) points.Add(new[] { i, i % 2 });
+        var plan = new JavaScriptSerializer().Serialize(new { sourceUnit="cm",coordinateUnit="source",commands=new object[] {
+            new {type="setvar",name="DIMSCALE",value=123}, new {type="line",points=points.ToArray()}} });
+        var rejected = Run(plan) == null;
+        Check(rejected && Count() == before && LastReceipt == "" && db.Insunits == previousUnits && db.Dimscale == previousScale,
+            "over-budget line expansion never enters CAD execution or changes entities, units, variables or receipt");
     }
 
     private static void VerifyGeometryReferences()

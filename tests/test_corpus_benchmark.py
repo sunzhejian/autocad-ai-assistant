@@ -251,5 +251,77 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(report['status'],'failed');self.assertIn('FileNotFoundError',report['error'])
 
 
+class NativeReceiptEvidenceTests(unittest.TestCase):
+    def fixture(self, folder, referenced=True):
+        plan = {'commands': [
+            {'type':'circle','id':'circle','center':[0,0],'radius':20},
+            {'type':'dimaligned','p1':[-20,0],'p2':[20,0],'position':[0,-30],'value':40}]}
+        record = {'command':'2','type':'AlignedDimension','space':'*Model_Space'}
+        if referenced:
+            plan['commands'][1]['reference'] = 'circle'
+            record.update(geometry_reference='circle', reference_command='1', reference_handles=['A'],
+                          reference_checked_at_execution=True, persistent_association_created=False,
+                          reference_endpoint_distances_mm=[0,0], reference_tolerance_mm=.001)
+        receipt = {'native_checks_passed':True,'source_accuracy_verified':False,
+                   'plan_sha256':'a'*64,'objects':[
+                       {'command':'1','type':'Circle','handle':'A','space':'*Model_Space'},record]}
+        benchmark.save(folder/'drawing.receipt.json',receipt)
+        # Deliberately synthetic bytes: these tests validate evidence routing,
+        # not AutoCAD geometry, which has a separate licensed integration suite.
+        for suffix in ['.dwg','.dxf']:
+            (folder/('drawing'+suffix)).write_bytes(b'synthetic evidence fixture')
+        proof = {'schema':2,'receipt_plan_sha256':'a'*64,'output_sha256':{
+            suffix:benchmark.digest(folder/('drawing'+suffix)) for suffix in ['.dwg','.dxf','.receipt.json']}}
+        return plan, receipt, proof
+
+    def rewrite(self, folder, receipt, proof):
+        benchmark.save(folder/'drawing.receipt.json',receipt)
+        proof['output_sha256']['.receipt.json'] = benchmark.digest(folder/'drawing.receipt.json')
+
+    def test_reference_coverage_and_actual_distances_are_archived(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder=Path(temporary);plan,_,proof=self.fixture(folder)
+            result=benchmark.native_receipt(folder,'drawing',proof,plan)
+            self.assertEqual(result['native_references_checked'],1)
+            self.assertEqual(result['linear_dimensions'],1)
+            self.assertEqual(result['max_reference_endpoint_distance_mm'],0)
+            self.assertFalse(result['source_accuracy_verified'])
+
+    def test_changed_drawing_or_receipt_cannot_use_an_old_manifest(self):
+        for suffix in ['.dwg','.dxf','.receipt.json']:
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as temporary:
+                folder=Path(temporary);plan,_,proof=self.fixture(folder)
+                with (folder/('drawing'+suffix)).open('ab') as output: output.write(b'changed')
+                with self.assertRaisesRegex(ValueError,'changed'):
+                    benchmark.native_receipt(folder,'drawing',proof,plan)
+
+    def test_missing_reference_wrong_target_and_invalid_distances_fail(self):
+        for mutation in ['missing','wrong_target','wrong_scope','outside','nan','persistent','source_claim','missing_hash','no_handles','unrelated_handle','other_space']:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                folder=Path(temporary);plan,receipt,proof=self.fixture(folder)
+                record=receipt['objects'][1]
+                if mutation=='missing':receipt['objects']=[]
+                elif mutation=='wrong_target':record['geometry_reference']='outer'
+                elif mutation=='wrong_scope':record['reference_command']='9.1'
+                elif mutation=='outside':record['reference_endpoint_distances_mm']=[0,.01]
+                elif mutation=='nan':record['reference_endpoint_distances_mm']=[0,float('nan')]
+                elif mutation=='persistent':record['persistent_association_created']=True
+                elif mutation=='source_claim':receipt['source_accuracy_verified']=True
+                elif mutation=='missing_hash':receipt.pop('plan_sha256');proof.pop('receipt_plan_sha256')
+                elif mutation=='no_handles':record['reference_handles']=[]
+                elif mutation=='unrelated_handle':record['reference_handles']=['B']
+                elif mutation=='other_space':record['space']='unrelated_block'
+                self.rewrite(folder,receipt,proof)
+                with self.assertRaises(ValueError):benchmark.native_receipt(folder,'drawing',proof,plan)
+
+    def test_unreferenced_dimensions_stay_explicitly_unchecked(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder=Path(temporary);plan,_,proof=self.fixture(folder,referenced=False)
+            result=benchmark.native_receipt(folder,'drawing',proof,plan)
+            self.assertEqual(result['referenced_dimensions'],0)
+            self.assertEqual(result['native_references_checked'],0)
+            self.assertIsNone(result['max_reference_endpoint_distance_mm'])
+
+
 if __name__=='__main__':
     unittest.main()

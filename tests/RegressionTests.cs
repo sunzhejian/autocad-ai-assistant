@@ -42,6 +42,7 @@ internal static class RegressionTests
             TestBufferedLogs();
             TestValidation();
             TestPreparedPlan();
+            TestPlanBudgets();
             TestDimensionSizeSemantics();
             TestGeometryReferences();
             TestReferenceRepair().GetAwaiter().GetResult();
@@ -314,6 +315,61 @@ internal static class RegressionTests
         var lines = File.ReadAllLines(DiagnosticsLog.FilePath);
         Check(lines.Length == 1000 && lines[lines.Length - 1].Contains("buffer-1199"), "bounded log batch retries after the file becomes writable");
         Check(!DiagnosticsLog.Snapshot().Contains("buffer-0") && DiagnosticsLog.Snapshot().Contains("buffer-1199"), "diagnostic snapshot retains only recent messages");
+    }
+
+    private static void TestPlanBudgets()
+    {
+        var points = new List<object>();
+        for (var i = 0; i < 6002; i++) points.Add(new[] { i, i % 2 });
+        var longLine = Json.Serialize(new { commands = new[] { new { type = "line", points = points.ToArray() } } });
+        var timer = Stopwatch.StartNew();
+        var error = CadPlanValidator.Validate(longLine);
+        Check(error != null && error.Contains("5000") && timer.ElapsedMilliseconds < 2000,
+            "one line command cannot expand into 6001 native entities on the CAD thread");
+        var compact = longLine.Replace("\"line\"", "\"polyline\"");
+        Check(CadPlanValidator.Validate(compact) == null,
+            "the same 6002 input vertices remain valid as one compact native polyline");
+        var boundary = new List<object>();
+        for (var i = 0; i <= 5000; i++) boundary.Add(new[] { i, i % 2 });
+        Check(CadPlanValidator.Validate(Json.Serialize(new { commands = new[] { new { type = "line", points = boundary.ToArray() } } })) == null,
+            "exactly 5000 finite native segments stay within the explicit budget");
+        var manyPoints = new[] {
+            new { type="polyline", points=points.ToArray() }, new { type="polyline", points=points.ToArray() },
+            new { type="polyline", points=points.ToArray() }, new { type="polyline", points=points.ToArray() }
+        };
+        Check(CadPlanValidator.Validate(Json.Serialize(new { commands=manyPoints })).Contains("20000"),
+            "input vertices are bounded across the whole plan rather than per command only");
+        var definitions = new List<Dictionary<string, object>>();
+        definitions.Add(new Dictionary<string, object> { {"type","block"}, {"name","b0"},
+            {"commands",new object[] { new { type="circle", center=new[]{0,0}, radius=1 } }} });
+        for (var level = 1; level <= 5; level++)
+        {
+            var inserts = new List<object>();
+            for (var i = 0; i < 10; i++) inserts.Add(new { type="insert", name="b"+(level-1), position=new[]{i*10,0} });
+            definitions.Add(new Dictionary<string, object> { {"type","block"}, {"name","b"+level}, {"commands",inserts.ToArray()} });
+        }
+        error = CadPlanValidator.Validate(Json.Serialize(new { commands=definitions.ToArray() }));
+        Check(error != null && (error.Contains("展开") || error.Contains("工作量")),
+            "a small sequence of reusable blocks cannot create exponential display work");
+        Check(CadPlanValidator.Validate(Json.Serialize(new { commands=new[] { definitions[0],definitions[1] } })) == null,
+            "ordinary repeated blocks remain valid instead of being expanded into duplicate geometry");
+        var ring = new List<object>();
+        for (var i = 0; i < 1800; i++) { var angle=i*Math.PI/900;ring.Add(new[] {1000*Math.Cos(angle),1000*Math.Sin(angle)}); }
+        var hatches = new List<object>();
+        for (var i=0;i<5;i++)hatches.Add(new { type="hatch",points=ring.ToArray() });
+        timer.Restart();
+        error=CadPlanValidator.Validate(Json.Serialize(new {commands=hatches.ToArray()}));
+        Check(error!=null && error.Contains("8192") && timer.ElapsedMilliseconds<2000,
+            "aggregate hatch budget is checked before quadratic ring topology work");
+        var text = new List<object>();
+        for (var i=0;i<9;i++) text.Add(new { type="mtext",position=new[]{0,i},height=3,content=new string('x',5000) });
+        Check(CadPlanValidator.Validate(Json.Serialize(new {commands=text.ToArray()})).Contains("40000"),
+            "large annotation batches are limited before native text layout");
+        var circles=new List<object>();for(var i=0;i<400;i++)circles.Add(new {type="circle",center=new[]{i,0},radius=1});
+        Check(CadPlanValidator.Validate(Json.Serialize(new {commands=circles.ToArray()}))==null,
+            "existing 400-command ordinary geometry workload remains valid");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"ngon\",\"center\":[0,0],\"radius\":1,\"sides\":\"1e9999\"}")) != null,
+            "the budget prepass leaves malformed numeric details to normal validation without throwing");
     }
 
     private static void TestGeometryReferences()

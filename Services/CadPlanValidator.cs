@@ -49,6 +49,8 @@ namespace AutoCAD.AI.Assistant.Services
             var commands = root.ContainsKey("commands") ? root["commands"] as object[] : null;
             if (commands == null) { errors.Add("缺少 commands 数组。"); return; }
             if (commands.Length == 0) { errors.Add("commands 为空。"); return; }
+            var budgetError = CadPlanBudget.Check(commands);
+            if (budgetError != null) { errors.Add(budgetError); return; }
             if (root.ContainsKey("sourceUnit") && !CadPlanQuality.IsUnit(Text(root, "sourceUnit")))
                 errors.Add("sourceUnit 仅支持 mm/cm/m，源单位坐标由执行器换算为毫米。");
             if (root.ContainsKey("coordinateUnit") && Text(root, "coordinateUnit") != "mm" && Text(root, "coordinateUnit") != "source")
