@@ -18,3 +18,4 @@ models.json.*
 *.key
 releases/
 output/
+.codex-attachments/

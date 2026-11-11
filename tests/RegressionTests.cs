@@ -60,6 +60,7 @@ internal static class RegressionTests
             TestClient().GetAwaiter().GetResult();
             TestAutoCompatibility().GetAwaiter().GetResult();
             TestRuntimeBehavior().GetAwaiter().GetResult();
+            TestCompletionReasons().GetAwaiter().GetResult();
             Console.WriteLine("TOTAL " + Passed + " passed"); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex); return 1; }
@@ -518,6 +519,53 @@ internal static class RegressionTests
         preview = new StreamingPreview(); preview.Append(new String('x', 100000));
         Check(preview.BufferedCharacters <= 8000 && preview.Take().Length < 8100 && preview.Take() == null,
             "stream preview is bounded and emits each changed snapshot only once");
+    }
+
+    private static async Task TestCompletionReasons()
+    {
+        var plan = Plan("{\"type\":\"circle\",\"center\":[0,0],\"radius\":20}");
+        Func<string, string> reply = finish => Json.Serialize(new { choices = new[] {
+            new { message = new { content = "```cad\n" + plan + "\n```" }, finish_reason = finish } } });
+        foreach (var finish in new[] { "content_filter", "tool_calls", "function_call", "upstream_error", "length" })
+        foreach (var streaming in new[] { false, true })
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, reply(finish));
+            var emitted = new StringBuilder();
+            try
+            {
+                await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null,
+                    streaming ? (Action<string>)(value => emitted.Append(value)) : null);
+                Check(false, "abnormal JSON finish must not release a valid-looking drawing plan");
+            }
+            catch (InvalidOperationException)
+            {
+                Check(s.Requests.Count == 1 && emitted.Length == 0,
+                    "JSON finish " + finish + " blocks execution and fallback (stream=" + streaming + ")");
+            }
+        }
+        foreach (var finish in new[] { "stop", null, "" })
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, reply(finish));
+            var answer = await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null);
+            Check(CadPlanText.Extract(answer) == plan && s.Requests.Count == 1,
+                "normal or omitted JSON finish stays compatible: " + (finish ?? "null"));
+        }
+        using (var s = new Server())
+        {
+            var invalid = Plan("{\"type\":\"circle\",\"center\":[0,0],\"radius\":-1}");
+            s.Response = i => Tuple.Create(200, i == 1 ? Reply(invalid) : reply("content_filter"));
+            try { await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", null); Check(false, "repair finish"); }
+            catch (InvalidOperationException) { Check(s.Requests.Count == 2, "repair cannot accept a filtered plan or make a third request"); }
+        }
+        using (var s = new Server())
+        {
+            var imagePlan = "{\"sourceUnit\":\"mm\",\"views\":[\"section\"],\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":20}]}";
+            s.Response = i => Tuple.Create(200, Reply(imagePlan).Replace("\"stop\"", "\"content_filter\""));
+            try { await new OpenAiCompatibleClient().CompleteAsync(Model(s), History(), "", ImagePath); Check(false, "vision finish"); }
+            catch (InvalidOperationException) { Check(s.Requests.Count == 1 && s.Requests[0].Contains("image_url"), "filtered image output does not trigger repair or text-only fallback"); }
+        }
     }
 
     private static async Task TestAutoCompatibility()

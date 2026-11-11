@@ -269,8 +269,7 @@ namespace AutoCAD.AI.Assistant.Services
                                     if (data == "[DONE]") { complete = true; break; }
                                     string finish;
                                     var delta = ExtractDelta(data, out finish);
-                                    if (finish == "length") throw new ModelResponseException("模型输出被截断，未执行。请缩小绘图范围或提高服务输出上限。");
-                                    if (!String.IsNullOrEmpty(finish) && finish != "stop") throw new ModelResponseException("模型未正常完成输出（" + finish + "），未执行。");
+                                    ValidateFinishReason(finish);
                                     if (finish == "stop") complete = true;
                                     if (String.IsNullOrEmpty(delta)) continue;
                                     if (builder.Length + delta.Length > 8 * 1024 * 1024)
@@ -338,6 +337,13 @@ namespace AutoCAD.AI.Assistant.Services
             return json;
         }
 
+        private static void ValidateFinishReason(string finish)
+        {
+            if (finish == "length") throw new ModelResponseException("模型输出被截断，未执行。请缩小绘图范围或提高服务输出上限。");
+            if (!String.IsNullOrEmpty(finish) && finish != "stop")
+                throw new ModelResponseException("模型未正常完成输出（" + finish + "），未执行。");
+        }
+
         private string ExtractContent(string json)
         {
             var result = _serializer.Deserialize<ChatResponse>(json);
@@ -345,8 +351,8 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 throw new InvalidOperationException("模型返回了空内容。");
             }
+            ValidateFinishReason(result.choices[0].finish_reason);
             var raw = result.choices[0].message.content;
-            if (result.choices[0].finish_reason == "length") throw new InvalidOperationException("模型输出被截断，未执行。请框选单个视图或提高服务输出上限。");
             var text = string.Empty;
             if (raw is string)
             {
