@@ -8,10 +8,23 @@ namespace AutoCAD.AI.Assistant.Views
     public partial class ModelSettingsWindow : Window
     {
         public ModelConfiguration Model { get; private set; }
+        private readonly ModelConfiguration _editing;
 
-        public ModelSettingsWindow()
+        public ModelSettingsWindow() : this(null) { }
+
+        public ModelSettingsWindow(ModelConfiguration existing)
         {
             InitializeComponent();
+            _editing = existing;
+            if (existing == null) return;
+            Title = "编辑模型"; SaveModelButton.Content = "保存修改";
+            UrlBox.Text = existing.RequestUrl; FullUrlCheck.IsChecked = existing.UseFullUrl;
+            ModelIdBox.Text = existing.ModelId; DisplayNameBox.Text = existing.DisplayName ?? "";
+            SystemPromptBox.Text = existing.SystemPrompt ?? "";
+            KeyHint.Text = "留空保留现有加密密钥；输入新密钥才会替换。保存不会发起请求。";
+            var effort = ModelConfiguration.NormalizeReasoningEffort(existing.ReasoningEffort) ?? "";
+            foreach (System.Windows.Controls.ComboBoxItem option in ReasoningEffortBox.Items)
+                if (Convert.ToString(option.Tag) == effort) { ReasoningEffortBox.SelectedItem = option; break; }
         }
 
         private void DisplayNameBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
@@ -52,6 +65,7 @@ namespace AutoCAD.AI.Assistant.Views
             ApiKeyBox.Clear();
             ApiKeyTextBox.Clear();
             SystemPromptBox.Clear();
+            ReasoningEffortBox.SelectedIndex = 0;
             FullUrlCheck.IsChecked = false;
         }
 
@@ -72,22 +86,29 @@ namespace AutoCAD.AI.Assistant.Views
                 MessageBox.Show("请输入模型 ID。", "自定义模型", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            if (string.IsNullOrWhiteSpace(apiKey))
+            if (string.IsNullOrWhiteSpace(apiKey) && (_editing == null || String.IsNullOrWhiteSpace(_editing.ApiKeyProtected)))
             {
                 MessageBox.Show("请输入 API 密钥。", "自定义模型", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            Model = new ModelConfiguration
-            {
-                RequestUrl = url,
-                UseFullUrl = FullUrlCheck.IsChecked == true,
-                ModelId = modelId,
-                DisplayName = DisplayNameBox.Text.Trim(),
-                ApiKeyProtected = SecretProtector.Protect(apiKey),
-                SystemPrompt = SystemPromptBox.Text.Trim()
-            };
+            Model = BuildModel(apiKey);
             DialogResult = true;
+        }
+
+        private ModelConfiguration BuildModel(string apiKey)
+        {
+            return new ModelConfiguration
+            {
+                Id = _editing == null ? Guid.NewGuid().ToString("N") : _editing.Id,
+                RequestUrl = UrlBox.Text.Trim(),
+                UseFullUrl = FullUrlCheck.IsChecked == true,
+                ModelId = ModelIdBox.Text.Trim(),
+                DisplayName = DisplayNameBox.Text.Trim(),
+                ApiKeyProtected = String.IsNullOrWhiteSpace(apiKey) ? _editing.ApiKeyProtected : SecretProtector.Protect(apiKey),
+                SystemPrompt = SystemPromptBox.Text.Trim(),
+                ReasoningEffort = ModelConfiguration.NormalizeReasoningEffort(Convert.ToString(((System.Windows.Controls.ComboBoxItem)ReasoningEffortBox.SelectedItem).Tag))
+            };
         }
     }
 }

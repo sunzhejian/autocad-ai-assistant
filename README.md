@@ -5,7 +5,7 @@
 ![AutoCAD 2024](https://img.shields.io/badge/AutoCAD-2024-red)
 ![Windows x64](https://img.shields.io/badge/Windows-x64-blue)
 
-AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前源码及本地安装版本 **1.5.1**，.NET Framework 4.8 / Windows x64。
+AutoCAD 2024 插件，提供启动绘图工具区和按需打开的 AI 助手，支持兼容 OpenAI Chat Completions 的模型、PDF 赛题导入、图片复刻和结构化几何绘制。当前源码版本 **1.5.2**，.NET Framework 4.8 / Windows x64。
 
 **AutoCAD 2024 assistant for Windows:** native drawing tools, local vector PDF import, image-to-CAD plans, unit and hatch validation, atomic undo, and OpenAI-compatible model configuration. AI reconstruction still needs human review.
 
@@ -29,6 +29,8 @@ v1.4.1 在五项新绘图能力的基础上，减少兼容服务的重复请求�
 长期开发按[阶段计划与验收门槛](docs/ROADMAP.md)推进，分别核对可执行性、源图准确性和实际耗时。v1.4.3 统一普通 JSON 与 SSE 的结束状态检查，异常完成的结果不落图、不重复请求。
 
 v1.5.1 增加[插件AI赛题评测闭环](docs/corpus-benchmark.md)，按真实图纸失败改进敞口填充反馈，并修复源单位标注样式被出图比例重复放大的问题。三类各三轮实测有6次落图、3次超时；选定读数通过不等于整图复刻成功。
+
+v1.5.2 加入[可选推理预算与当前模型编辑](docs/reasoning-1.5.2-2026-11-11.md)。默认不发送新参数；当前auto交错实测未显示low有稳定收益，保留服务默认。右键模型下拉框可编辑，留空保留原加密密钥。
 
 ## 使用
 
@@ -81,7 +83,7 @@ v1.2.1 默认关闭命令频次统计；可在“指令集”勾选“统计命�
 
 聊天保留最近 40 条可见消息和 12 条完整上下文消息（实际模型请求仍选最近 8 条）；长消息只展示前 8000 字符。聊天图片在后台解码，最长边 480 像素、最多同时解码 2 张；附件预览最长边 256 像素，模型仍使用原图处理流程。
 
-鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板名称应显示 **AI 1.5.1**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
+鼠标移动或选择仍不顺畅时，可输入 `AIPERF` 关闭悬停、命令、填充实时预览和悬停属性提示；执行前保存原值。`AIPERFRESTORE` 恢复原值。备份为本地 `preview-settings.json`，重复启用不会覆盖最初备份。安装按内容哈希并存 DLL，保存图纸后重启 CAD，面板名称应显示 **AI 1.5.2**。详见 [基础性能验收](docs/performance-1.2.1-2026-11-05.md) 与 [大图性能验收](docs/performance-1.2.2-2026-11-06.md)。
 
 v1.2.2 图片复刻跳过旧图上下文；文字请求最多抽样 512 个图元、读取 128 个简单范围，以 25ms 为扫描目标（单次原生调用不可中断）。返回的类型与范围明确标为抽样，CAD 命令执行中则跳过扫描。面板的缓存读取与计划预检在后台运行，执行前再次核对图形状态。
 
@@ -110,7 +112,7 @@ powershell -File tools\Test-Pdf-Cad.ps1 -SourcePdf '赛题.pdf' -Page 3 -PlotPdf
 .\Install.ps1
 ```
 
-纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。v1.5.1 当前为 189 项纯回归和 43 项原生集成检查；GitHub CI 另执行 PDF worker 测试和提交文件检查，不声称在云端完成有许可的原生 CAD 验证。
+纯逻辑和本地 HTTP 回归不依赖 CAD 许可，在 GitHub Actions 的 Windows 环境执行。原生集成验证需要本机 AutoCAD，使用新建的临时图形。后台验证和复刻统一通过 `run_console.py` 的 `/isolate` 独立配置运行，防止脚本的 `FILEDIA=0` 等设置影响日常 CAD 配置，异常退出也保持隔离。该开关的用途见 [Autodesk 官方说明](https://blog.autodesk.io/getting-started-with-accoreconsole/)。v1.5.2 当前为 212 项纯回归和 43 项原生集成检查；GitHub CI 另执行 PDF worker 测试和提交文件检查，不声称在云端完成有许可的原生 CAD 验证。
 
 ## 本地题库复刻
 

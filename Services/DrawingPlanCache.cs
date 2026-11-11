@@ -20,6 +20,8 @@ namespace AutoCAD.AI.Assistant.Services
                 var imageHash = Convert.ToBase64String(sha.ComputeHash(stream));
                 var identity = imageHash + "\n" + prompt + "\n" + model.RequestUrl + "\n" + model.UseFullUrl + "\n"
                     + model.ModelId + "\n" + model.SystemPrompt + "\n" + details + "\n" + OpenAiCompatibleClient.DrawingProtocol;
+                var effort = ModelConfiguration.NormalizeReasoningEffort(model.ReasoningEffort);
+                if (effort != null) identity += "\nreasoning_effort=" + effort;
                 return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(identity))).Replace("-", "").ToLowerInvariant();
             }
         }

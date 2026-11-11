@@ -99,7 +99,9 @@ def verify(path):
                 measurement = math.hypot(b.x-a.x,b.y-a.y) if dim.dimtype == 1 else float(dim.get_measurement())
                 displayed = measurement * dim.override().get("dimlfac", 1)
                 edge = a[1-axis]
-                on_boundary = near(edge, bounds[1-axis]) or near(edge, bounds[3-axis])
+                # Opposed sides can be measured at valid mid-edge points too;
+                # requiring corners would reject legitimate native dimensions.
+                on_boundary = bounds[1-axis] - .01 <= edge <= bounds[3-axis] + .01
                 if (angle_ok and near(low, bounds[axis]) and near(high, bounds[axis + 2])
                         and on_boundary and near(a[1 - axis], b[1 - axis]) and near(displayed, value)
                         and dim.dxf.get("text", "") in ("", "<>")):
@@ -138,7 +140,7 @@ def verify(path):
     check("each texture preserves the actual section boundaries and empty hole", bool(hatches) and all(hatch_matches_section(h, outer, inner) for h in hatches))
     return {"case": "sixth-section33", "dxf_sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
             "scope": "Selected source semantics only; font shapes, all line spacing and pixel identity require visual review.",
-            "source_accuracy_verified": False, "verifier_version": 3, "checks": checks, "passed": sum(c["passed"] for c in checks),
+            "source_accuracy_verified": False, "verifier_version": 4, "checks": checks, "passed": sum(c["passed"] for c in checks),
             "total": len(checks), "hatch_patterns": sorted(patterns), "centerlines": centers}
 
 

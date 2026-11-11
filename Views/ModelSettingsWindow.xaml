@@ -37,7 +37,7 @@
       <TextBlock Text="添加兼容 OpenAI Chat Completions 的模型服务" FontSize="12" Foreground="#858A93" Margin="0,6,0,0" />
     </StackPanel>
 
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <StackPanel>
         <TextBlock FontSize="13" FontWeight="SemiBold"><Run Foreground="#E5484D">* </Run>API 格式</TextBlock>
         <ComboBox SelectedIndex="0" Margin="0,8,0,18" Padding="8,7" Background="#F0F1F3">
@@ -71,10 +71,22 @@
           <TextBox x:Name="ApiKeyTextBox" Visibility="Collapsed" />
           <CheckBox Grid.Column="1" Content="显示" Margin="10,0,0,0" VerticalAlignment="Center" Checked="ShowKey_Checked" Unchecked="ShowKey_Checked" />
         </Grid>
-        <TextBlock Text="密钥使用 Windows DPAPI 按当前用户加密保存。" FontSize="11" Foreground="#92969E" Margin="0,6,0,0" />
+        <TextBlock x:Name="KeyHint" Text="密钥使用 Windows DPAPI 按当前用户加密保存。" TextWrapping="Wrap" FontSize="11" Foreground="#92969E" Margin="0,6,0,0" />
 
         <Expander Header="高级配置" Margin="0,20,0,4" Foreground="#3E4045">
           <StackPanel Margin="0,12,0,0">
+            <TextBlock Text="推理预算（可选）" FontSize="12" />
+            <ComboBox x:Name="ReasoningEffortBox" SelectedIndex="0" Margin="0,8,0,0" Padding="8,7">
+              <ComboBoxItem Content="服务默认" Tag="" />
+              <ComboBoxItem Content="不使用推理（none）" Tag="none" />
+              <ComboBoxItem Content="最少（minimal）" Tag="minimal" />
+              <ComboBoxItem Content="较低（low）" Tag="low" />
+              <ComboBoxItem Content="中等（medium）" Tag="medium" />
+              <ComboBoxItem Content="较高（high）" Tag="high" />
+              <ComboBoxItem Content="很高（xhigh）" Tag="xhigh" />
+              <ComboBoxItem Content="最大（max）" Tag="max" />
+            </ComboBox>
+            <TextBlock Text="服务默认保留原有行为。较低预算可能减少等待，也可能影响复杂图准确率；支持范围由服务和模型决定。" TextWrapping="Wrap" FontSize="11" Foreground="#92969E" Margin="0,6,0,14" />
             <TextBlock Text="系统提示词（可选）" FontSize="12" />
             <TextBox x:Name="SystemPromptBox" Height="90" Margin="0,8,0,0" MaxLength="4000" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" />
           </StackPanel>
@@ -86,7 +98,7 @@
       <TextBlock Text="保存时不会发起模型请求。" VerticalAlignment="Center" FontSize="11" Foreground="#858A93" />
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
         <Button Content="重置" Background="#E7E8EA" Foreground="#303238" Style="{StaticResource ActionButton}" Margin="0,0,10,0" Click="Reset_Click" />
-        <Button Content="添加模型" Style="{StaticResource ActionButton}" Click="Add_Click" />
+        <Button x:Name="SaveModelButton" Content="添加模型" Style="{StaticResource ActionButton}" Click="Add_Click" />
       </StackPanel>
     </Grid>
   </Grid>

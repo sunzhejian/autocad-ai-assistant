@@ -34,12 +34,28 @@ internal static class ModelBenchmark
             if (configs.Count == 0) throw new Exception("No configured model.");
             var modelType = assembly.GetType("AutoCAD.AI.Assistant.Models.ModelConfiguration", true);
             var requested = Environment.GetEnvironmentVariable("CADAI_BENCH_MODEL");
-            var model = String.IsNullOrWhiteSpace(requested) ? configs[0] : configs.SingleOrDefault(c => String.Equals(Convert.ToString(modelType.GetProperty("ModelId").GetValue(c, null)), requested, StringComparison.OrdinalIgnoreCase));
+            var configuration = Environment.GetEnvironmentVariable("CADAI_BENCH_CONFIG_ID");
+            var candidates = !String.IsNullOrWhiteSpace(configuration)
+                ? configs.Where(c => String.Equals(Convert.ToString(modelType.GetProperty("Id").GetValue(c, null)), configuration, StringComparison.OrdinalIgnoreCase)).ToList()
+                : String.IsNullOrWhiteSpace(requested) ? configs.Take(1).ToList()
+                : configs.Where(c => String.Equals(Convert.ToString(modelType.GetProperty("ModelId").GetValue(c, null)), requested, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (candidates.Count > 1) throw new Exception("Multiple profiles share this model ID; select CADAI_BENCH_CONFIG_ID explicitly.");
+            var model = candidates.SingleOrDefault();
             if (model == null) throw new Exception("The requested model ID is not configured.");
+            var requestedEffort = Environment.GetEnvironmentVariable("CADAI_BENCH_REASONING");
+            var effortProperty = modelType.GetProperty("ReasoningEffort");
+            if (!String.IsNullOrWhiteSpace(requestedEffort))
+            {
+                if (effortProperty == null) throw new Exception("This plugin does not expose reasoning-budget configuration.");
+                effortProperty.SetValue(model, requestedEffort == "default" ? null : requestedEffort.Trim().ToLowerInvariant(), null);
+            }
+            var effectiveEffort = effortProperty == null ? null : Convert.ToString(effortProperty.GetValue(model, null));
+            report["reasoning_effort_requested"] = effectiveEffort;
             report["model"] = modelType.GetProperty("ModelId").GetValue(model, null);
             var identity = new Dictionary<string, object>();
             foreach (var property in new[] { "ModelId", "RequestUrl", "UseFullUrl", "SystemPrompt" })
                 identity[property] = modelType.GetProperty(property).GetValue(model, null);
+            if (!String.IsNullOrWhiteSpace(effectiveEffort)) identity["ReasoningEffort"] = effectiveEffort.Trim().ToLowerInvariant();
             using (var sha = SHA256.Create())
                 report["model_configuration_sha256"] = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(Json.Serialize(identity)))).Replace("-", "").ToLowerInvariant();
             if (args.Length == 5 && args[3] == "--cache-plan")
@@ -79,6 +95,14 @@ internal static class ModelBenchmark
             var client = Activator.CreateInstance(clientType, true);
             var responses = new List<Dictionary<string, object>>();
             report["raw_responses"] = responses;
+            var attempts = new List<Dictionary<string, object>>(); report["request_attempts"] = attempts;
+            var requestProperty = clientType.GetProperty("RequestObserver");
+            report["request_options_capture_available"] = requestProperty != null;
+            if (requestProperty != null)
+            {
+                Action<Dictionary<string, object>> observe = options => attempts.Add(new Dictionary<string, object>(options));
+                requestProperty.SetValue(client, observe, null);
+            }
             var observerProperty = clientType.GetProperty("ResponseObserver");
             report["response_capture_available"] = observerProperty != null;
             if (observerProperty != null)
@@ -121,6 +145,8 @@ internal static class ModelBenchmark
             report["stream_requested"] = streaming; report["stream_callback_characters"] = deltaCharacters;
             report["detailed_images"] = details;
             report["answer"] = answer;
+            var warning = clientType.GetProperty("LastCompatibilityWarning");
+            report["compatibility_warning"] = warning == null ? null : warning.GetValue(client, null);
             var plan = (string)assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanText", true).GetMethod("Extract").Invoke(null, new object[] { answer });
             report["plan"] = plan;
             report["validation"] = plan == null ? (image == null ? null : "No plan") : assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanValidator", true)

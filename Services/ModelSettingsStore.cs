@@ -30,7 +30,7 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 Uri uri;
                 if (model == null || String.IsNullOrWhiteSpace(model.Id) || !ids.Add(model.Id)
-                    || String.IsNullOrWhiteSpace(model.ModelId) || !Uri.TryCreate(model.RequestUrl, UriKind.Absolute, out uri)
+                    || String.IsNullOrWhiteSpace(model.ModelId) || !ModelConfiguration.IsValidReasoningEffort(model.ReasoningEffort) || !Uri.TryCreate(model.RequestUrl, UriKind.Absolute, out uri)
                     || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
                     throw new InvalidDataException("模型配置条目无效。");
             }

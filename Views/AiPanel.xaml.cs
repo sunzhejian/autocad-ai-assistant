@@ -91,8 +91,25 @@ namespace AutoCAD.AI.Assistant.Views
             RefreshShortcuts();
         }
 
+        private void EditModel_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isSending || _preparingPdf) { StatusText.Text = "请在当前任务结束后编辑模型。"; return; }
+            var previous = ModelCombo.SelectedItem as ModelConfiguration;
+            if (previous == null) { AddModel_Click(sender, e); return; }
+            var window = new ModelSettingsWindow(previous);
+            if (window.ShowDialog() != true || window.Model == null) return;
+            var index = _models.IndexOf(previous);
+            if (index < 0) return;
+            var snapshot = _models.ToList(); snapshot[index] = window.Model;
+            try { _store.Save(snapshot); }
+            catch (Exception ex) { StatusText.Text = "保存模型失败，原配置已保留：" + ex.Message; return; }
+            _models[index] = window.Model; ModelCombo.SelectedItem = window.Model;
+            StatusText.Text = "模型设置已保存，下次请求生效。";
+        }
+
         private void AddModel_Click(object sender, RoutedEventArgs e)
         {
+            if (_isSending || _preparingPdf) { StatusText.Text = "请在当前任务结束后添加模型。"; return; }
             var window = new ModelSettingsWindow();
             if (window.ShowDialog() != true || window.Model == null) return;
 
@@ -467,6 +484,8 @@ namespace AutoCAD.AI.Assistant.Views
                 var plan = CadDrawingExecutor.ExtractPlan(answer);
                 var display = CadDrawingExecutor.RemovePlan(answer);
                 if (string.IsNullOrWhiteSpace(display)) display = plan == null ? answer : "已生成绘图指令。";
+                if (cachedPlan == null && !String.IsNullOrEmpty(_client.LastCompatibilityWarning))
+                    display = _client.LastCompatibilityWarning + "\n" + display;
 
                 string validationError = null;
                 if (plan != null)

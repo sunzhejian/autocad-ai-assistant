@@ -166,6 +166,17 @@ def aggregate(results):
     return list(groups.values())
 
 
+def reasoning_unavailable(result, effort):
+    if effort in (None, 'default'):return False
+    options=result.get('request_attempts') or []
+    if result.get('compatibility_warning') or (options and not options[-1].get('reasoning_effort_sent')):
+        return True
+    error=result.get('error','').lower()
+    if 'does not expose reasoning' in error:return True
+    return (not result.get('request_success') and 'reasoning_effort' in error and
+            any(term in error for term in ['unsupported value','supported values','unsupported parameter','not supported','does not support','不支持']))
+
+
 def native_preflight(run, plugin, identity, env):
     folder = run / 'runtime' / 'preflight'
     folder.mkdir()
@@ -193,6 +204,7 @@ def trial(case, number, prepared, run, plugin, helper, identity, env):
     image = run / 'sources' / (case['id'] + '.png')
     result = {'case': case['id'], 'trial': number, 'fresh_request': True, 'stage': 'request',
               'request_success': False, 'execution_success': False, 'selected_checks_passed': False,
+              'reasoning_effort_override': env.get('CADAI_BENCH_REASONING'),
               'source_accuracy_verified': False, **prepared}
     started = time.monotonic()
     prompt = case.get('prompt') or ('复刻当前实际可见的工程视图、轮廓、尺寸和材料，不补画未给出的视图。源图单位为' + case['sourceUnit'] + '，按源图比例和真实尺寸建立几何。')
@@ -206,7 +218,8 @@ def trial(case, number, prepared, run, plugin, helper, identity, env):
                                     folder / 'request.log', 280, env)
         result['request_wall_seconds'] = seconds
         model = read(report)
-        for key in ['model', 'model_configuration_sha256', 'plugin_version']:
+        for key in ['model', 'model_configuration_sha256', 'plugin_version', 'reasoning_effort_requested',
+                    'request_attempts', 'request_options_capture_available', 'compatibility_warning']:
             result[key] = model.get(key)
         result['model_seconds'] = model.get('seconds')
         result['response_capture_available'] = model.get('response_capture_available', False)
@@ -280,9 +293,17 @@ def main():
     mode.add_argument('--prepare-only', action='store_true')
     mode.add_argument('--preflight-only', action='store_true')
     parser.add_argument('--detailed-images', action='store_true', help='Use the same whole-image plus detailed tiles path as the plugin UI')
+    reasoning_mode=parser.add_mutually_exclusive_group()
+    reasoning_mode.add_argument('--reasoning-effort', choices=['default','none','minimal','low','medium','high','xhigh','max'],
+                        help='Override only the in-memory benchmark profile; never edits saved credentials or settings')
+    reasoning_mode.add_argument('--reasoning-schedule', nargs='+', choices=['default','none','minimal','low','medium','high','xhigh','max'],
+                                help='One explicit budget per round, e.g. default low low default default low; cannot combine with --trials')
     args = parser.parse_args()
     if not 1 <= args.trials <= 20:
         parser.error('--trials must be 1..20')
+    if args.reasoning_schedule and (args.trials != 1 or len(args.reasoning_schedule)>20):
+        parser.error('--reasoning-schedule defines 1..20 rounds; do not combine it with --trials')
+    schedule=args.reasoning_schedule or [args.reasoning_effort]*args.trials
     cases = read(ROOT / 'tests/corpus_cases.json')['cases']
     selected = args.selected or DEFAULT_CASES
     if len(set(selected)) != len(selected) or set(selected) - {c['id'] for c in cases}:
@@ -291,7 +312,9 @@ def main():
     run = args.output.resolve() / (datetime.now(timezone.utc).strftime('run-%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8])
     (run / 'sources').mkdir(parents=True, exist_ok=False)
     report = {'schema': 1, 'mode': 'prepare_only' if args.prepare_only else 'preflight_only' if args.preflight_only else 'fresh_plugin_ai',
-              'source_accuracy_verified': False, 'model': args.model, 'requested_trials': args.trials, 'detailed_images': args.detailed_images,
+              'source_accuracy_verified': False, 'model': args.model, 'requested_trials': len(schedule), 'detailed_images': args.detailed_images,
+              'reasoning_effort_override': args.reasoning_effort,
+              'reasoning_schedule':schedule,
               'started_utc': datetime.now(timezone.utc).isoformat(), 'cases': cases, 'results': [],
               'status': 'preparing', 'scope': 'Declared selected source checks, not full image accuracy.'}
     save(run / 'report.json', report)
@@ -328,6 +351,7 @@ def main():
             raise ValueError('Model helper compilation failed')
         env = dict(os.environ, CADAI_BENCH_MODEL=args.model, CADAI_BENCH_STREAM='0',
                    CADAI_BENCH_DETAILS='1' if args.detailed_images else '0')
+        env = {k:v for k,v in env.items() if k.lower() != 'cadai_bench_reasoning'}
         report['status'] = 'preflight'
         save(run / 'report.json', report)
         report['native_preflight'] = native_preflight(run, plugin, identity, env)
@@ -336,13 +360,22 @@ def main():
             return 0
         report['status'] = 'running'
         save(run / 'report.json', report)
-        for number in range(1, args.trials + 1):
+        for number,effort in enumerate(schedule,1):
+            trial_env=dict(env)
+            if effort is not None:trial_env['CADAI_BENCH_REASONING']=effort
             for case in cases:
-                result = trial(case, number, prepared[case['id']], run, plugin, helper, identity, env)
+                result = trial(case, number, prepared[case['id']], run, plugin, helper, identity, trial_env)
+                result['reasoning_effort_override']=effort
                 report['results'].append(result)
                 report['summary'] = aggregate(report['results'])
                 save(run / 'report.json', report)
-                print(f"{case['id']} trial={number} request={result['request_success']} native={result['execution_success']} source={result.get('checks_passed',0)}/{result.get('checks_total',0)} elapsed={result['elapsed_seconds']} error={result.get('error','')}", flush=True)
+                print(f"{case['id']} trial={number} reasoning={effort or 'profile'} request={result['request_success']} native={result['execution_success']} source={result.get('checks_passed',0)}/{result.get('checks_total',0)} elapsed={result['elapsed_seconds']} error={result.get('error','')}", flush=True)
+                if reasoning_unavailable(result,effort):
+                    report['status']='reasoning_override_unavailable'
+                    report['unattempted_rounds']=len(schedule)-number
+                    report['unattempted_attempts']=len(schedule)*len(cases)-len(report['results'])
+                    print('Requested reasoning option unavailable; remaining paid comparison requests were not sent.',flush=True)
+                    return 1
         report['status'] = 'completed'
         return 0 if all(r['selected_checks_passed'] for r in report['results']) else 1
     except KeyboardInterrupt:

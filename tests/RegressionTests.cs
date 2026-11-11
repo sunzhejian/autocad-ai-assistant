@@ -63,6 +63,7 @@ internal static class RegressionTests
             TestRuntimeBehavior().GetAwaiter().GetResult();
             TestCompletionReasons().GetAwaiter().GetResult();
             TestRepairEvidence().GetAwaiter().GetResult();
+            TestReasoningEffort().GetAwaiter().GetResult();
             Console.WriteLine("TOTAL " + Passed + " passed"); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex); return 1; }
@@ -80,6 +81,13 @@ internal static class RegressionTests
         var model = new ModelConfiguration { ModelId = "local-model", RequestUrl = "http://localhost:1234/v1", ApiKeyProtected = SecretProtector.Protect("test-local-secret") };
         store.Save(new[] { model });
         Check(SecretProtector.Unprotect(store.Load()[0].ApiKeyProtected) == "test-local-secret", "atomic model save preserves DPAPI encrypted credentials");
+        model.ReasoningEffort = "low"; store.Save(new[] { model });
+        Check(store.Load()[0].ReasoningEffort == "low" && SecretProtector.Unprotect(store.Load()[0].ApiKeyProtected) == "test-local-secret",
+            "reasoning profile persists while preserving the encrypted existing credential");
+        var beforeInvalidBudget = File.ReadAllText(path); model.ReasoningEffort = "invented";
+        try { store.Save(new[] { model }); Check(false,"invalid reasoning persistence"); }
+        catch (InvalidDataException) { Check(File.ReadAllText(path) == beforeInvalidBudget, "invalid reasoning setting cannot overwrite a healthy profile"); }
+        model.ReasoningEffort = "low";
         model.DisplayName = "renamed"; store.Save(new[] { model });
         File.WriteAllText(path, "{truncated");
         Check(store.Load()[0].DisplayName == null && store.LastWarning != null, "damaged model primary recovers the last valid backup visibly");
@@ -442,6 +450,10 @@ internal static class RegressionTests
         cache.SaveExecuted(key, plan);
         Check(cache.TryRead(key) == plan, "executed plan cache round trip");
         Check(key != DrawingPlanCache.Key(ImagePath, "copy changed", model, false), "prompt changes invalidate cache");
+        model.ReasoningEffort = "low";
+        Check(key != DrawingPlanCache.Key(ImagePath, "copy", model, false), "reasoning changes invalidate the executed-plan cache");
+        model.ReasoningEffort = " ";
+        Check(key == DrawingPlanCache.Key(ImagePath, "copy", model, false), "service-default reasoning preserves the previous cache identity");
         model.ModelId = "other";
         Check(key != DrawingPlanCache.Key(ImagePath, "copy", model, false), "model changes invalidate cache");
         var path = Path.Combine(folder, "cache", key + ".json");
@@ -552,6 +564,102 @@ internal static class RegressionTests
         preview = new StreamingPreview(); preview.Append(new String('x', 100000));
         Check(preview.BufferedCharacters <= 8000 && preview.Take().Length < 8100 && preview.Take() == null,
             "stream preview is bounded and emits each changed snapshot only once");
+    }
+
+    private static string Reasoning(string request)
+    {
+        var payload = (Dictionary<string, object>)Json.DeserializeObject(request);
+        return payload.ContainsKey("reasoning_effort") ? Convert.ToString(payload["reasoning_effort"]) : null;
+    }
+
+    private static async Task TestReasoningEffort()
+    {
+        Func<string, string> reply = text => Json.Serialize(new { choices = new[] { new { message = new { content = text }, finish_reason = "stop" } } });
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, reply("DEFAULT"));
+            var client = new OpenAiCompatibleClient();
+            var answer = await client.CompleteAsync(Model(s), History(), "", null);
+            Check(answer == "DEFAULT" && Reasoning(s.Requests[0]) == null && client.LastCompatibilityWarning == null,
+                "service default sends no reasoning field and changes no existing behavior");
+        }
+        foreach (var streaming in new[] { false, true })
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(200, streaming ? StreamReply("LOW") : reply("LOW"));
+            var model = Model(s); model.ModelId = "auto"; model.ReasoningEffort = " LOW ";
+            var requests = new List<Dictionary<string, object>>();
+            var client = new OpenAiCompatibleClient { RequestObserver = options => requests.Add(options) };
+            var answer = await client.CompleteAsync(model, History(), "", null, streaming ? (Action<string>)(value => { }) : null);
+            Check(answer == "LOW" && Reasoning(s.Requests[0]) == "low" && !HasTemperature(s.Requests[0]),
+                "auto preserves its model and temperature fix with explicitly selected reasoning (stream=" + streaming + ")");
+            Check(requests.Count == 1 && (bool)requests[0]["reasoning_effort_sent"] && requests[0].Count == 5
+                && !requests[0].ContainsKey("messages") && !requests[0].ContainsKey("Authorization"),
+                "request diagnostics expose only option metadata, not prompts or credentials");
+        }
+        const string unsupported = "{\"error\":{\"message\":\"Unsupported parameter: reasoning_effort\"}}";
+        foreach (var streaming in new[] { false, true })
+        using (var s = new Server())
+        {
+            s.Response = i => i == 1 ? Tuple.Create(400, unsupported) : Tuple.Create(200, streaming ? StreamReply("FALLBACK") : reply("FALLBACK"));
+            var model = Model(s); model.ModelId = "auto"; model.ReasoningEffort = "low";
+            var client = new OpenAiCompatibleClient();
+            var answer = await client.CompleteAsync(model, History(), "", null, streaming ? (Action<string>)(value => { }) : null);
+            Check(answer == "FALLBACK" && s.Requests.Count == 2 && Reasoning(s.Requests[0]) == "low" && Reasoning(s.Requests[1]) == null
+                && client.LastCompatibilityWarning != null, "explicit unsupported reasoning field retries once and visibly records service-default fallback");
+            var first = (Dictionary<string, object>)Json.DeserializeObject(s.Requests[0]);
+            var second = (Dictionary<string, object>)Json.DeserializeObject(s.Requests[1]); first.Remove("reasoning_effort");
+            Check(Json.Serialize(first) == Json.Serialize(second), "reasoning fallback preserves model, image/messages and stream mode");
+            await client.CompleteAsync(model, History(), "", null, streaming ? (Action<string>)(value => { }) : null);
+            Check(s.Requests.Count == 3 && Reasoning(s.Requests[2]) == null && client.LastCompatibilityWarning != null,
+                "unsupported reasoning capability is remembered, with a warning on later requests");
+            model.ModelId = "different-model";
+            await client.CompleteAsync(model, History(), "", null, streaming ? (Action<string>)(value => { }) : null);
+            Check(Reasoning(s.Requests[3]) == "low" && client.LastCompatibilityWarning == null,
+                "reasoning capability memory does not leak to another model");
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(400, "{\"error\":{\"message\":\"Unsupported value: reasoning_effort low; supported values are high\"}}");
+            var model = Model(s); model.ReasoningEffort = "low";
+            try { await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", null); Check(false, "unsupported reasoning value"); }
+            catch (InvalidOperationException) { Check(s.Requests.Count == 1, "unsupported reasoning value is not silently replaced by another budget"); }
+        }
+        using (var s = new Server())
+        {
+            var valid = Plan("{\"type\":\"circle\",\"center\":[0,0],\"radius\":20}");
+            s.Response = i => Tuple.Create(200, Reply(i == 1 ? valid.Replace(":20", ":-1") : valid));
+            var model = Model(s); model.ReasoningEffort = "medium";
+            await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", null);
+            Check(s.Requests.Count == 2 && Reasoning(s.Requests[0]) == "medium" && Reasoning(s.Requests[1]) == "medium",
+                "single plan repair keeps the explicit reasoning budget");
+        }
+        using (var s = new Server())
+        {
+            var valid = "{\"sourceUnit\":\"mm\",\"coordinateUnit\":\"source\",\"views\":[\"section\"],\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":20}]}";
+            s.Response = i => i == 1 ? Tuple.Create(400, unsupported) : Tuple.Create(200, Reply(valid));
+            var model = Model(s); model.ModelId = "auto"; model.ReasoningEffort = "low";
+            await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", ImagePath);
+            Check(s.Requests.Count == 2 && s.Requests[0].Contains("image_url") && s.Requests[1].Contains("image_url") && Reasoning(s.Requests[1]) == null,
+                "reasoning fallback retains the source image and never becomes text-only reproduction");
+        }
+        using (var s = new Server())
+        {
+            var model = Model(s); model.ReasoningEffort = "unrecognised-budget";
+            try { await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", null); Check(false,"invalid reasoning option"); }
+            catch (InvalidOperationException) { Check(s.Requests.Count == 0, "invalid reasoning configuration never reaches the provider"); }
+        }
+        using (var s = new Server())
+        {
+            s.Response = i => Tuple.Create(400, "{\"error\":{\"message\":\"Unsupported value: reasoning_effort low; supported values are high\"}}");
+            var model = Model(s); model.ReasoningEffort = "low";
+            try { await new OpenAiCompatibleClient().CompleteAsync(model, History(), "", ImagePath); Check(false, "image reasoning diagnostic"); }
+            catch (InvalidOperationException ex) { Check(s.Requests.Count == 1 && ex.Message.Contains("reasoning_effort"),
+                "image request errors preserve the actual rejected parameter instead of claiming missing vision support"); }
+        }
+        Check(ModelConfiguration.IsValidReasoningEffort(null) && ModelConfiguration.IsValidReasoningEffort("HIGH")
+            && ModelConfiguration.IsValidReasoningEffort("none") && !ModelConfiguration.IsValidReasoningEffort("invented"),
+            "reasoning configuration validates documented options without requiring every provider to support them");
     }
 
     private static async Task TestRepairEvidence()

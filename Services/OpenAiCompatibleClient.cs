@@ -41,9 +41,12 @@ namespace AutoCAD.AI.Assistant.Services
         // Optional diagnostics for controlled benchmarks; the normal UI does not
         // persist response bodies or install an observer.
         public Action<string, string> ResponseObserver { get; set; }
+        public Action<Dictionary<string, object>> RequestObserver { get; set; }
+        public string LastCompatibilityWarning { get; private set; }
         private static readonly object CapabilitySync = new object();
         private static readonly HashSet<string> NoTemperature = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> NoStreaming = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly HashSet<string> NoReasoningEffort = new HashSet<string>(StringComparer.Ordinal);
         private sealed class ModelResponseException : InvalidOperationException
         { public ModelResponseException(string message) : base(message) { } }
         private static bool SupportsStreaming(string url, string model)
@@ -54,12 +57,49 @@ namespace AutoCAD.AI.Assistant.Services
             if (String.Equals((model ?? "").Trim(), "auto", StringComparison.OrdinalIgnoreCase)) return false;
             lock (CapabilitySync) return !NoTemperature.Contains(url + "\n" + model);
         }
-        private string SerializeRequest(string url, ChatRequest body, out bool temperatureSent)
+        private static bool SupportsReasoningEffort(string url, string model)
+        { lock (CapabilitySync) return !NoReasoningEffort.Contains(url + "\n" + model); }
+
+        private string SerializeRequest(string url, ChatRequest body, out bool temperatureSent, out bool reasoningSent)
         {
             var payload = new Dictionary<string, object> { { "model", body.model }, { "messages", body.messages }, { "stream", body.stream } };
             temperatureSent = IncludeTemperature(url, body.model);
             if (temperatureSent) payload["temperature"] = body.temperature;
+            reasoningSent = !String.IsNullOrEmpty(body.reasoning_effort) && SupportsReasoningEffort(url, body.model);
+            if (reasoningSent) payload["reasoning_effort"] = body.reasoning_effort;
             return _serializer.Serialize(payload);
+        }
+
+        private void ObserveRequest(ChatRequest body, bool temperatureSent, bool reasoningSent)
+        {
+            var observer = RequestObserver;
+            if (observer == null) return;
+            try { observer(new Dictionary<string, object> { { "model", body.model }, { "stream", body.stream },
+                { "temperature_sent", temperatureSent }, { "reasoning_effort_sent", reasoningSent },
+                { "reasoning_effort", reasoningSent ? body.reasoning_effort : null } }); }
+            catch (Exception ex) { throw new ModelResponseException("记录请求选项失败，未自动重复请求：" + ex.Message); }
+        }
+
+        private bool LearnReasoningRejection(string url, string model, int status, string json, bool sent)
+        {
+            if (!sent || (status != 400 && status != 422)) return false;
+            var detail = ErrorMessage(json).ToLowerInvariant();
+            if (!detail.Contains("reasoning_effort") || detail.Contains("unsupported value") || detail.Contains("supported values")
+                || detail.Contains("must be one of") || detail.Contains("not support value") || detail.Contains("does not support the value")) return false;
+            var fieldRejected = detail.Contains("unsupported parameter") || detail.Contains("unsupported_parameter")
+                || detail.Contains("not support parameter") || detail.Contains("not support the parameter")
+                || detail.Contains("reasoning_effort is not supported") || detail.Contains("'reasoning_effort' is not supported")
+                || detail.Contains("\"reasoning_effort\" is not supported") || detail.Contains("reasoning_effort not supported")
+                || detail.Contains("not support reasoning_effort");
+            if (!fieldRejected) return false;
+            lock (CapabilitySync)
+            {
+                if (NoReasoningEffort.Count >= 128) NoReasoningEffort.Clear();
+                NoReasoningEffort.Add(url + "\n" + model);
+            }
+            LastCompatibilityWarning = "当前服务不支持所选推理预算，本次使用服务默认设置。";
+            DiagnosticsLog.Write("请求参数兼容：服务明确拒绝 reasoning_effort，省略该参数并保持模型和消息重试一次。");
+            return true;
         }
         private bool LearnTemperatureRejection(string url, string model, int status, string json, bool temperatureSent)
         {
@@ -89,6 +129,9 @@ namespace AutoCAD.AI.Assistant.Services
             string imagePath, Action<string> onDelta, CancellationToken cancellation, Action<string> progress, bool detailedImages = false)
         {
             // One budget covers preprocessing, retries, streaming fallback and the optional repair.
+            LastCompatibilityWarning = null;
+            if (!ModelConfiguration.IsValidReasoningEffort(model.ReasoningEffort)) throw new InvalidOperationException("无效的推理预算设置。");
+            var effort = ModelConfiguration.NormalizeReasoningEffort(model.ReasoningEffort);
             using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
             {
                 deadline.CancelAfter(TimeSpan.FromSeconds(imagePath != null ? 240 : 120));
@@ -97,6 +140,8 @@ namespace AutoCAD.AI.Assistant.Services
                     ? model.RequestUrl.Trim()
                     : model.RequestUrl.Trim().TrimEnd('/') + "/chat/completions";
                 var key = SecretProtector.Unprotect(model.ApiKeyProtected);
+                if (effort != null && !SupportsReasoningEffort(url, model.ModelId))
+                    LastCompatibilityWarning = "当前服务不支持所选推理预算，本次使用服务默认设置。";
                 var messages = imagePath == null
                     ? BuildMessages(model, history, drawingContext, null)
                     : await Task.Run(() => BuildMessages(model, history, drawingContext, imagePath, token, detailedImages), token).ConfigureAwait(false);
@@ -106,15 +151,15 @@ namespace AutoCAD.AI.Assistant.Services
 
                 if (onDelta != null && imagePath == null && SupportsStreaming(url, model.ModelId))
                 {
-                    var streamed = await TryStreamAsync(url, key, model.ModelId, messages, onDelta, timeoutSeconds, token).ConfigureAwait(false);
+                    var streamed = await TryStreamAsync(url, key, model.ModelId, messages, onDelta, timeoutSeconds, token, effort).ConfigureAwait(false);
                     if (streamed != null)
                     {
                         DiagnosticsLog.Write("请求完成 文本通道 状态=200 " + Elapsed(started) + "ms");
-                        return await ValidateAndRepairAsync(streamed, url, key, model.ModelId, messages, imagePath != null, token, progress).ConfigureAwait(false);
+                        return await ValidateAndRepairAsync(streamed, url, key, model.ModelId, messages, imagePath != null, token, progress, effort).ConfigureAwait(false);
                     }
                 }
 
-                var body = new ChatRequest { model = model.ModelId, messages = messages, temperature = 0.2, stream = false };
+                var body = new ChatRequest { model = model.ModelId, messages = messages, temperature = 0.2, stream = false, reasoning_effort = effort };
                 var result = await PostWithRetryAsync(url, key, body, timeoutSeconds, token).ConfigureAwait(false);
                 DiagnosticsLog.Write("请求完成 状态=" + result.status + " " + Elapsed(started) + "ms 模式=" + (imagePath != null ? "图片" : "文本"));
 
@@ -122,16 +167,16 @@ namespace AutoCAD.AI.Assistant.Services
                 {
                     var detail = ErrorMessage(result.json);
                     if (imagePath != null && (result.status == 400 || result.status == 415 || result.status == 422))
-                        throw new InvalidOperationException("图片请求被拒绝（" + result.status + "），请检查模型是否支持视觉输入。未进行纯文字复刻。");
+                        throw new InvalidOperationException("图片请求被拒绝（" + result.status + "）：" + detail + "。未执行绘图，也未改成纯文字请求。");
                     DiagnosticsLog.Write("请求失败 状态=" + result.status + " " + detail);
                     throw new InvalidOperationException("模型请求失败（" + result.status + "）：" + detail);
                 }
-                return await ValidateAndRepairAsync(ExtractContent(result.json), url, key, model.ModelId, messages, imagePath != null, token, progress).ConfigureAwait(false);
+                return await ValidateAndRepairAsync(ExtractContent(result.json), url, key, model.ModelId, messages, imagePath != null, token, progress, effort).ConfigureAwait(false);
             }
         }
 
         private async Task<string> ValidateAndRepairAsync(string answer, string url, string key, string model,
-            List<ChatMessage> messages, bool image, CancellationToken token, Action<string> progress)
+            List<ChatMessage> messages, bool image, CancellationToken token, Action<string> progress, string effort)
         {
             string plan = null;
             string error;
@@ -148,7 +193,7 @@ namespace AutoCAD.AI.Assistant.Services
             messages.Add(new ChatMessage { role = "assistant", content = answer });
             messages.Add(new ChatMessage { role = "user", content = "本地校验未通过，尚未执行。一次修正全部问题并返回完整唯一cad计划，勿删除尺寸或伪造文字规避校验。"
                 + (image ? "图片计划须同时补全顶层sourceUnit(mm/cm/m)、coordinateUnit(source)、views(实际可见视图名)，按源单位给出坐标；单位依据图片和用户说明，不得猜测。" : "") + "\n" + error });
-            var response = await PostWithRetryAsync(url, key, new ChatRequest { model = model, messages = messages, temperature = 0.1 }, 240, token).ConfigureAwait(false);
+            var response = await PostWithRetryAsync(url, key, new ChatRequest { model = model, messages = messages, temperature = 0.1, reasoning_effort = effort }, 240, token).ConfigureAwait(false);
             if (!IsSuccess(response.status)) throw new InvalidOperationException("计划修正失败（" + response.status + "），未执行绘图。");
             var repaired = ExtractContent(response.json);
             plan = CadPlanText.Extract(repaired);
@@ -174,12 +219,16 @@ namespace AutoCAD.AI.Assistant.Services
 
         private async Task<PostResult> PostWithRetryAsync(string url, string key, ChatRequest body, int timeoutSeconds, CancellationToken token)
         {
-            var compatibilityRetried = false; var transientRetried = false;
+            var compatibilityRetried = false; var reasoningRetried = false; var transientRetried = false;
             while (true)
             {
                 var result = await PostAsync(url, key, body, timeoutSeconds, token).ConfigureAwait(false);
+                var learned = false;
                 if (!compatibilityRetried && LearnTemperatureRejection(url, body.model, result.status, result.json, result.temperatureSent))
-                { compatibilityRetried = true; continue; }
+                { compatibilityRetried = true; learned = true; }
+                if (!reasoningRetried && LearnReasoningRejection(url, body.model, result.status, result.json, result.reasoningSent))
+                { reasoningRetried = true; learned = true; }
+                if (learned) continue;
                 if (transientRetried || (result.status != 429 && result.status < 500)) return result;
                 transientRetried = true;
                 DiagnosticsLog.Write("请求重试 状态=" + result.status);
@@ -194,19 +243,20 @@ namespace AutoCAD.AI.Assistant.Services
             {
                 cancellation.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-                bool temperatureSent;
-                request.Content = new StringContent(SerializeRequest(url, body, out temperatureSent), Encoding.UTF8, "application/json");
+                bool temperatureSent, reasoningSent;
+                request.Content = new StringContent(SerializeRequest(url, body, out temperatureSent, out reasoningSent), Encoding.UTF8, "application/json");
+                ObserveRequest(body, temperatureSent, reasoningSent);
                 using (var response = await Http.SendAsync(request, cancellation.Token).ConfigureAwait(false))
                 {
                     var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     if (ResponseObserver != null) ResponseObserver("http-" + (int)response.StatusCode, json);
-                    return new PostResult { status = (int)response.StatusCode, json = json, temperatureSent = temperatureSent };
+                    return new PostResult { status = (int)response.StatusCode, json = json, temperatureSent = temperatureSent, reasoningSent = reasoningSent };
                 }
             }
         }
 
         /// <summary>Accept SSE or JSON from this same response; never retry a partial answer.</summary>
-        private async Task<string> TryStreamAsync(string url, string key, string modelId, List<ChatMessage> messages, Action<string> onDelta, int timeoutSeconds, CancellationToken token)
+        private async Task<string> TryStreamAsync(string url, string key, string modelId, List<ChatMessage> messages, Action<string> onDelta, int timeoutSeconds, CancellationToken token, string effort)
         {
             var emitted = false;
             using (var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token))
@@ -214,13 +264,15 @@ namespace AutoCAD.AI.Assistant.Services
                 cancellation.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
                 try
                 {
-                    for (var attempt = 0; attempt < 2; attempt++)
+                    var temperatureRetried = false; var reasoningRetried = false;
+                    for (var attempt = 0; attempt < 3; attempt++)
                     using (var request = new HttpRequestMessage(HttpMethod.Post, url))
                     {
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-                        var body = new ChatRequest { model = modelId, messages = messages, temperature = 0.2, stream = true };
-                        bool temperatureSent;
-                        request.Content = new StringContent(SerializeRequest(url, body, out temperatureSent), Encoding.UTF8, "application/json");
+                        var body = new ChatRequest { model = modelId, messages = messages, temperature = 0.2, stream = true, reasoning_effort = effort };
+                        bool temperatureSent, reasoningSent;
+                        request.Content = new StringContent(SerializeRequest(url, body, out temperatureSent, out reasoningSent), Encoding.UTF8, "application/json");
+                        ObserveRequest(body, temperatureSent, reasoningSent);
                         using (var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation.Token).ConfigureAwait(false))
                         {
                             var status = (int)response.StatusCode;
@@ -228,7 +280,10 @@ namespace AutoCAD.AI.Assistant.Services
                             {
                                 var error = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                                 if (ResponseObserver != null) ResponseObserver("stream-http-" + status, error);
-                                if (attempt == 0 && LearnTemperatureRejection(url, modelId, status, error, temperatureSent)) continue;
+                                var learned = false;
+                                if (!temperatureRetried && LearnTemperatureRejection(url, modelId, status, error, temperatureSent)) { temperatureRetried = true; learned = true; }
+                                if (!reasoningRetried && LearnReasoningRejection(url, modelId, status, error, reasoningSent)) { reasoningRetried = true; learned = true; }
+                                if (learned) continue;
                                 var detail = ErrorMessage(error);
                                 var lower = detail.ToLowerInvariant();
                                 if ((status == 400 || status == 406 || status == 415 || status == 422 || status == 501)
@@ -435,6 +490,7 @@ namespace AutoCAD.AI.Assistant.Services
             public List<ChatMessage> messages { get; set; }
             public double temperature { get; set; }
             public bool stream { get; set; }
+            public string reasoning_effort { get; set; }
         }
 
         private sealed class ChatMessage
@@ -448,6 +504,7 @@ namespace AutoCAD.AI.Assistant.Services
             public int status { get; set; }
             public string json { get; set; }
             public bool temperatureSent { get; set; }
+            public bool reasoningSent { get; set; }
         }
 
         private sealed class ChatResponse
