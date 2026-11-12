@@ -54,6 +54,7 @@ internal static class RegressionTests
             TestDimensionFormatVariables();
             TestNewDrawingFeatures();
             TestMaterials();
+            TestPointSpacing();
             TestHatchBoundaries();
             TestMaterialLeaders();
             foreach (var fixture in Directory.GetFiles("tests/fixtures", "*.json"))
@@ -797,6 +798,42 @@ internal static class RegressionTests
         var c=(Dictionary<string,object>)((object[])root["commands"])[0];
         Check(Convert.ToDouble(c["spacing"])==50, "texture spacing converts with source geometry");
         Check(HatchMaterialPolicy.TooDense(1000000,.1), "excessive hatch density detected");
+    }
+
+    private static void TestPointSpacing()
+    {
+        var hatch = "{\"type\":\"hatch\",\"pattern\":\"AR-SAND\",\"pointSpacing\":2,\"points\":[[0,0],[100,0],[100,100],[0,100]]}";
+        Check(CadPlanValidator.Validate(Plan(hatch)) == null, "area-equivalent point spacing accepted for AR-SAND");
+        Check(CadPlanValidator.Validate(Plan(hatch.Replace("AR-SAND", "DOTS"))) == null, "point spacing accepted for DOTS");
+        Check(CadPlanValidator.Validate(Plan(hatch.Replace("\"pattern\":\"AR-SAND\"", "\"material\":\"sand\""))) == null, "sand preset resolves to a supported pure point pattern");
+        foreach (var value in new[] { "0", "-1", "1e309", "100000001" })
+            Check(CadPlanValidator.Validate(Plan(hatch.Replace("\"pointSpacing\":2", "\"pointSpacing\":" + value))) != null, "invalid point spacing rejected: " + value);
+        foreach (var value in new[] { "ANSI31", "AR-CONC", "SOLID" })
+            Check(CadPlanValidator.Validate(Plan(hatch.Replace("AR-SAND", value))) != null, "point spacing cannot pretend to size non-point pattern " + value);
+        foreach (var field in new[] { "spacing", "scale" })
+            Check(CadPlanValidator.Validate(Plan(hatch.Replace("\"pointSpacing\":2", "\"pointSpacing\":2,\"" + field + "\":1"))) != null, "point spacing rejects ambiguous " + field);
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"circle\",\"center\":[0,0],\"radius\":1,\"pointSpacing\":2}")) != null, "point spacing cannot be silently ignored on other entities");
+        var normalized = CadPlanNormalizer.Normalize("{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[" + hatch + "]}");
+        var root = (Dictionary<string, object>)Json.DeserializeObject(normalized);
+        var command = (Dictionary<string, object>)((object[])root["commands"])[0];
+        Check(Convert.ToDouble(command["pointSpacing"]) == 20 && CadPlanNormalizer.Normalize(normalized) == normalized,
+            "point spacing source units convert exactly once");
+        var d = HatchMaterialPolicy.PointFamilyDensity(0, 3, 2, new[] { 0.0, -4.0 });
+        var a = .7;
+        var rotated = HatchMaterialPolicy.PointFamilyDensity(a, 3 * Math.Cos(a) - 2 * Math.Sin(a), 3 * Math.Sin(a) + 2 * Math.Cos(a), new[] { 0.0, -4.0 });
+        Check(Math.Abs(d - .125) < 1e-10 && Math.Abs(d - rotated) < 1e-10,
+            "point rate uses perpendicular line gap and repeat period, invariant under rotation and along-line shift");
+        Check(Math.Abs(HatchMaterialPolicy.PointFamilyDensity(0, 6, 4, new[] { 0.0, -8.0 }) - d / 4) < 1e-10,
+            "doubling physical point pattern scale quarters its area density");
+        foreach (var dash in new[] { new[] { 1.0, -4.0 }, new[] { 0.0, 0.0 }, new[] { Double.NaN, -1.0 } })
+        {
+            var rejected = false;
+            try { HatchMaterialPolicy.PointFamilyDensity(0, 0, 2, dash); } catch (InvalidOperationException) { rejected = true; }
+            Check(rejected, "invalid or mixed line-and-dot pattern cannot produce a false point rate");
+        }
+        var basePlan = Plan(hatch);
+        var patched = CadPlanPatch.Apply(basePlan, Json.Serialize(new { base_sha256 = CadPlanPatch.Hash(basePlan), updates = new[] { new { command = "1", fields = new { pointSpacing = 3 } } } }));
+        Check(patched.Contains("\"pointSpacing\":3") && basePlan.Contains("\"pointSpacing\":2"), "density-only patch preserves original geometry and plan text");
     }
 
     private static void TestCache(string folder)

@@ -1100,7 +1100,19 @@ namespace AutoCAD.AI.Assistant.Services
             var requestedScale = Number(command, "scale", 0);
             var autoScale = ComputeHatchScale(points);
             hatch.PatternScale = solid ? 1.0 : Math.Max(0.01, autoScale * (requestedScale <= 0 ? 1.0 : requestedScale));
-            if (!solid && (hasMaterial || command.ContainsKey("spacing")))
+            if (command.ContainsKey("pointSpacing"))
+            {
+                var target = Number(command, "pointSpacing", 0);
+                var area = PolygonArea(points);
+                if (command.ContainsKey("holes"))
+                    foreach (var hole in (object[])command["holes"])
+                        area -= PolygonArea(Points(new Dictionary<string, object> { { "points", hole } }, "points"));
+                if (target <= 0 || HatchMaterialPolicy.TooDense(area, target))
+                    throw new InvalidOperationException("点填充过密或pointSpacing无效，请增加面积等效点距。");
+                hatch.PatternScale = 1;
+                hatch.PatternScale = target * Math.Sqrt(CadNativeHatch.PointDensity(hatch));
+            }
+            else if (!solid && (hasMaterial || command.ContainsKey("spacing")))
             {
                 var currentScale = space.Database.Dimscale > 0 ? space.Database.Dimscale : 1;
                 var target = Number(command, "spacing", paperSize * currentScale);

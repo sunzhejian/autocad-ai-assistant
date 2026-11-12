@@ -25,7 +25,7 @@ namespace AutoCAD.AI.Assistant.Services
             "polyline可带bulges数组，与points等长；每值为该顶点至下一顶点圆弧的tan(扫角/4)，正值逆时针，负值顺时针，0为直线，半圆为±1；开放折线末值为0，弧不能用很多短线代替。" +
             "line/polyline可带dashLength（实际最长实段的模型长度，按源坐标单位给出）；执行器按真实线型定义和当前LTSCALE计算该新实体的比例，不改已有图元或线型定义。读取源图中心线/虚线长短节奏时优先指定dashLength，不能只给CENTER名字就认为外观正确；连续线/纯点线不能使用此字段。" +
             "spline{points}；point{position}；text{position,height,content}；mtext{position,height,width,content}；" +
-            "hatch{points,holes,material,spacing,pattern,scale,angle}（holes为内孔多边形数组。材料优先material:riprap块石/gravel碎石/sand砂/earth土/clay粘土/concrete混凝土，自动按当前DIMSCALE控制纸面疏密；spacing可选，指定源坐标单位下的纹理大小；不要用几块孤立多边形代替整个石材区域填充。材料填充与文字、引线分开，保留层间边界与内孔）；dimlinear{p1,p2,position,rotation}；dimaligned{p1,p2,position}；" +
+            "hatch{points,holes,material,spacing,pointSpacing,pattern,scale,angle}（holes为内孔多边形数组。材料优先material:riprap块石/gravel碎石/sand砂/earth土/clay粘土/concrete混凝土，自动按当前DIMSCALE控制纸面疏密；spacing可选，指定源坐标单位下的纹理大小；不要用几块孤立多边形代替整个石材区域填充。材料填充与文字、引线分开，保留层间边界与内孔）；dimlinear{p1,p2,position,rotation}；dimaligned{p1,p2,position}；" +
             "填充拓扑：U形、槽形或向外敞开的空白是外轮廓的凹缺口，应沿真实边界顺序写成一个凹多边形points；holes仅用于完全位于外环内部且不接触外环的封闭孔洞。多视图、相邻构件分别创建填充，不用相互接触或重叠的内孔拼接。保留源尺寸和实际开口，不删除孔洞、不缩小孔洞来规避校验。" +
             "dimradius{center,point}；dimdiameter{center,point}；block{name,commands}；insert{name,position,rotation,scale}；setvar{name,value}；" +
             "尺寸几何引用：可给line/rect/polyline（直边）/circle增加稳定id；dimlinear/dimaligned可加reference引用同一作用域内实际被测轮廓的id，p1/p2必须在该轮廓上，合法边中点可用。图片中能定位轮廓的线性尺寸优先声明reference；内孔尺寸引用内孔轮廓，不挂在外墙上。id在块内局部唯一；不跨块、不引用含bulges圆弧多段线或hatch，不为通过检查虚构辅助轮廓。只验证本次落图，非持久关联约束。" +
@@ -33,11 +33,12 @@ namespace AutoCAD.AI.Assistant.Services
             "standard{}（建标准图层+仿宋+SL73标注）；frame{size,title,scale,number,company,date,origin}（A0–A4 图框+标题栏，原点0,0；scale 为出图比例如 1:100，执行器按该比例整体放大图框/标题栏/字高，并自动设置 DIMSCALE 与 LTSCALE）。" +
             "规则：含块内部共≤400条；预计新建图元≤5000、输入点≤20000、填充边界合计≤8192、文字合计≤40000字符；块展开受独立工作量上限控制，不用层层插入制造海量重复。连续折线优先polyline，重复构件用block+insert，勿凑指令数。完整图纸先standard再frame；局部截图不加图框。frame固定按纸面mm生成；源单位坐标布局时，图框宽高/内框边距/字高需除以源单位毫米系数（cm为10，m为1000），避开右下标题栏。尺寸优先于像素比例；从基准和尺寸链计算坐标，保证投影对应和对称；剖面用hatch、图名说明用text。每条图片尺寸标注附value（源图读数）、confidence:read/inferred/unknown；模糊尺寸不得冒充read。source坐标模式下，dimlinear的value须等于端点在rotation方向投影长度，dimaligned为实际距离；dimdiameter的point是圆周点。text只可用<>或<>（估），不可覆盖测量值。无需复述题面。1:100字高为350mm，若sourceUnit=cm则height=35。" +
             "复刻以源图外观为准，不以通用规范替换图中实际符号。先在内部核对每个视图的外形/内孔/尺寸端点/中心线/图名和下划线数量，再输出完整计划。图名按相对图幅大小取字高，不要把图名放大到接近内孔高度，不自行添加源图没有的双下划线。" +
-            "复刻填充先看实际纹理：原图若是斜线加颗粒，不用只有三角碎石的AR-CONC替代；可用同一points和holes的两个hatch叠加ANSI31和DOTS/AR-SAND。清楚可辨时只指定pattern、spacing及angle，material是纹理辨不清时的近似预设。spacing为源坐标单位下相邻纹理的特征间隔，按图中线距与已读实体尺寸的比值估算。ANSI31自带45度斜线，angle=0保持该角度，angle是额外旋转。单色原图默认color=7，不用灰色弱化其填充。" +
+            "复刻填充先看实际纹理：原图若是斜线加颗粒，不用只有三角碎石的AR-CONC替代；可用同一points和holes的两个hatch叠加ANSI31和DOTS/AR-SAND。清楚可辨时指定pattern及相应间距/角度，material是纹理辨不清时的近似预设。旧spacing指定图案特征大小，不保证随机点的面积等效点距；斜线spacing按源图垂直线距与已读实体尺寸比值估算。ANSI31自带45度斜线，angle=0保持该角度，angle是额外旋转。单色原图默认color=7，不用灰色弱化其填充。" +
+            "点纹理DOTS/AR-SAND优先用pointSpacing替代spacing：它是面积等效点距，约sqrt(A/N)，A为扣除内孔的材料面积、N为该区域估计可见点数，长度单位同源坐标；不等于最近两颗粒的距离，也不是旧spacing。按源图整体疏密估计，不把局部最小间隙当全区点距；不能同时给spacing或scale。原生按图案各点族的实际周期和垂直行距校准，估计点数约A/pointSpacing²；边界裁切会有偏差。斜线层仍用spacing指定垂直线距。" +
             "setvar仅支持DIMSCALE/LTSCALE/CELTSCALE/TEXTSIZE/DIMTXT/DIMASZ/DIMEXO/DIMEXE/DIMGAP/DIMDEC/LWDISPLAY/DIMLFAC/DIMTAD/DIMLUNIT/DIMZIN/DIMTIH/DIMTOH/DIMTSZ。竖向尺寸文字需沿尺寸线时DIMTIH=0、DIMTOH=0。尺寸端点按源图区分短斜线与箭头：DIMTSZ>0设置短斜线大小（源单位），DIMTSZ=0使用箭头。" +
             "source坐标模式的DIMTXT/DIMASZ/DIMEXO/DIMEXE/DIMGAP/DIMTSZ也是模型空间源参数长度，本地换算为mm后除以DIMSCALE，比例只应用一次。注意DIMTSZ不是完整tick长度：标准线性/对齐标注的完整45度斜线约为该模型参数的2*sqrt(2)倍，须从原图实测完整长度再换算，勿套用通用样例。text.height等普通几何长度仍按源单位给出。" +
             "粗线0.5、图框0.7、细线0.25；图层名含轮廓自动粗线、含中心/轴线自动CENTER、含虚线自动DASHED；" +
-            "填充scale省略=自动（1=自动，>1更疏，<1更密）；frame 已按比例设 DIMSCALE/LTSCALE，不要再手动设；未要求画图不输出代码块；不要声称已执行。";
+            "未用pointSpacing时填充scale省略=自动（1=自动，>1更疏，<1更密）；pointSpacing不使用scale；frame 已按比例设 DIMSCALE/LTSCALE，不要再手动设；未要求画图不输出代码块；不要声称已执行。";
 
         private static readonly HttpClient Http = new HttpClient { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         internal const string PlanPatchProtocol =
@@ -47,7 +48,7 @@ namespace AutoCAD.AI.Assistant.Services
             + "updates最多16项，同一command只出现一次；坐标和长度使用摘要所示原始坐标单位，不能自行换算mm。"
             + "只修复复核指出的问题，保留已正确的图形。不得输出完整commands，不改轮廓坐标、内孔、value、单位、reference、side、文字内容或指令类型。"
             + "dim/dimlinear/dimaligned只可改position；text/mtext可改position/height/rotation，mtext另可改width；"
-            + "leader可改position/height/arrowSize；hatch可改spacing/scale/angle/lineweight；line/polyline只可改dashLength（实际最长实段）。"
+            + "leader可改position/height/arrowSize；hatch可改spacing/pointSpacing/scale/angle/lineweight，但pointSpacing不能与spacing/scale混用，不能删除原字段；line/polyline只可改dashLength（实际最长实段）。"
             + "lineweight始终为纸面mm；角度为度；LTSCALE/DIMSCALE无量纲，不能把它们当作源长度。"
             + "setvars只可含LTSCALE、DIMSCALE、DIMTXT、DIMASZ、DIMTSZ、DIMEXO、DIMEXE、DIMGAP、DIMTAD、DIMTIH、DIMTOH；"
             + "有图框/块/多视图/中途改变样式时不提供全局setvars。不要修改DIMLFAC或安全设置，不添加源图没有的内容。";

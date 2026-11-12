@@ -33,6 +33,27 @@ namespace AutoCAD.AI.Assistant.Services
         }
 
         public static bool TooDense(double area, double spacing) { return spacing > 0 && area / (spacing * spacing) > 250000; }
+
+        // Infinite point-symbol rate for one native pattern line family. Offsets
+        // returned by AutoCAD are in WCS and include the hatch rotation/scale.
+        public static double PointFamilyDensity(double angle, double offsetX, double offsetY, IEnumerable<double> dashes)
+        {
+            if (!Finite(angle) || !Finite(offsetX) || !Finite(offsetY)) throw new InvalidOperationException("点图案定义包含非有限数值。");
+            var gap = Math.Abs(-Math.Sin(angle) * offsetX + Math.Cos(angle) * offsetY);
+            var period = 0.0; var dots = 0;
+            foreach (var dash in dashes)
+            {
+                if (!Finite(dash) || dash > 0) throw new InvalidOperationException("pointSpacing只支持纯点图案，不能代替线段纹理大小。");
+                if (dash == 0) dots++; else period -= dash;
+            }
+            var cell = gap * period;
+            if (dots == 0 || cell <= 0 || !Finite(cell)) throw new InvalidOperationException("点图案缺少有效的点、周期或垂直行距。");
+            var density = dots / cell;
+            if (density <= 0 || !Finite(density)) throw new InvalidOperationException("点图案密度超出有效范围。");
+            return density;
+        }
+
+        private static bool Finite(double value) { return !Double.IsNaN(value) && !Double.IsInfinity(value); }
         private static double Median(List<double> values, double fallback)
         {
             if (values.Count == 0) return fallback;

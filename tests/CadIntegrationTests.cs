@@ -133,6 +133,8 @@ public sealed class CadIntegrationTests
             }
         }
         var materialBefore=Count();
+        VerifyPointHatches();
+        materialBefore=Count();
         var materials="{\"commands\":[{\"type\":\"hatch\",\"material\":\"gravel\",\"spacing\":50,\"points\":[[20000,0],[21000,0],[21000,200],[20000,200]]},{\"type\":\"hatch\",\"material\":\"gravel\",\"spacing\":50,\"points\":[[20000,500],[25000,500],[25000,700],[20000,700]]}]}";
         Check(Run(materials)!=null && Count()==materialBefore+2,"material hatch native execution");
         using(var tr=db.TransactionManager.StartTransaction())
@@ -548,6 +550,36 @@ public sealed class CadIntegrationTests
             Check(rejected, "drawing unit change invalidates waiting AI result");
         }
         document.Database.Insunits = oldUnits;
+    }
+
+    private void VerifyPointHatches()
+    {
+        var db = AcApplication.DocumentManager.MdiActiveDocument.Database;
+        var originalDimscale = db.Dimscale;
+        var before = Count();
+        var plan = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":[{\"type\":\"setvar\",\"name\":\"DIMSCALE\",\"value\":100},{\"type\":\"hatch\",\"pattern\":\"DOTS\",\"pointSpacing\":2,\"points\":[[4000,0],[4100,0],[4100,100],[4000,100]],\"holes\":[[[4020,20],[4080,20],[4080,80],[4020,80]]]},{\"type\":\"setvar\",\"name\":\"DIMSCALE\",\"value\":0.5},{\"type\":\"hatch\",\"pattern\":\"AR-SAND\",\"pointSpacing\":2,\"angle\":37,\"points\":[[4200,0],[4300,0],[4300,100],[4200,100]]}]}";
+        try
+        {
+            Check(Run(plan) != null && Count() == before + 2, "DOTS and rotated AR-SAND execute with source-unit area-equivalent point spacing");
+            var receipt = (Dictionary<string, object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(LastReceipt));
+            var records = (object[])receipt["objects"];
+            var valid = records.Length == 2;
+            foreach (Dictionary<string, object> record in records)
+                valid &= Math.Abs(Convert.ToDouble(record["point_spacing_mm"]) - 20) < 1e-8
+                    && Math.Abs(Convert.ToDouble(record["point_density_per_mm2"]) - .0025) < 1e-10;
+            Check(valid, "native point-density receipt measures 20mm spacing for both pattern families and rotation");
+            Check(db.Dimscale == .5 && valid, "explicit point spacing stays physical across DIMSCALE changes");
+            var first = (Dictionary<string, object>)records[0];
+            Check(Convert.ToInt32(first["loops"]) == 2 && Math.Abs(Convert.ToDouble(first["area_mm2"]) - 640000) < 1e-6
+                && Math.Abs(Convert.ToDouble(first["estimated_pattern_points"]) - 1600) < 1e-6,
+                "point-density estimate subtracts the native empty hole and records symbol rate rather than exact clipped count");
+        }
+        finally { AcApplication.SetSystemVariable("DIMSCALE", originalDimscale); }
+        before = Count();
+        Check(Run("{\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":5},{\"type\":\"hatch\",\"pattern\":\"DOTS\",\"pointSpacing\":0.01,\"points\":[[0,0],[1000,0],[1000,1000],[0,1000]]}]}") == null
+            && Count() == before, "excessive actual point rate rejects the entire native batch");
+        Check(Run("{\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":5},{\"type\":\"hatch\",\"pattern\":\"ANSI31\",\"pointSpacing\":20,\"points\":[[0,0],[100,0],[100,100],[0,100]]}]}") == null
+            && Count() == before, "line hatches cannot silently ignore a requested point spacing");
     }
 
     [CommandMethod("AIGUARDCAPTURE")]

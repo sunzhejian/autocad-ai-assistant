@@ -1,0 +1,16 @@
+{
+  "sourceUnit": "cm",
+  "coordinateUnit": "source",
+  "commands": [
+    {
+      "type": "hatch", "pattern": "DOTS", "pointSpacing": 2,
+      "points": [[0,0],[100,0],[100,100],[0,100]],
+      "holes": [[[20,20],[80,20],[80,80],[20,80]]]
+    },
+    {
+      "type": "hatch", "pattern": "AR-SAND", "pointSpacing": 2, "angle": 37,
+      "points": [[200,0],[300,0],[300,100],[200,100]],
+      "holes": [[[220,20],[280,20],[280,80],[220,80]]]
+    }
+  ]
+}

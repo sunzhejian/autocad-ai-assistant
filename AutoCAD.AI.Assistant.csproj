@@ -94,6 +94,7 @@
     <Compile Include="Services\DrawingPlanCache.cs" />
     <Compile Include="Services\CadPlanNormalizer.cs" />
     <Compile Include="Services\HatchMaterialPolicy.cs" />
+    <Compile Include="Services\CadNativeHatch.cs" />
     <Compile Include="Services\HatchBoundaryValidator.cs" />
     <Compile Include="Services\DiagnosticsLog.cs" />
     <Compile Include="Services\BackgroundWork.cs" />

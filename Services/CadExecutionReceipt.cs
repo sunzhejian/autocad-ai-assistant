@@ -118,6 +118,19 @@ namespace AutoCAD.AI.Assistant.Services
                         record["area_mm2"] = actualArea; record["expected_area_mm2"] = expectedArea;
                         record["loops"] = hatch.NumberOfLoops; record["pattern"] = hatch.PatternName;
                         record["pattern_scale"] = hatch.PatternScale;
+                        if (command.ContainsKey("pointSpacing"))
+                        {
+                            var density = CadNativeHatch.PointDensity(hatch);
+                            var spacing = 1 / Math.Sqrt(density);
+                            var expectedSpacing = CadPlanQuality.Number(command["pointSpacing"]);
+                            if (Math.Abs(spacing - expectedSpacing) > Math.Max(1e-8, expectedSpacing * 1e-8))
+                                throw new InvalidOperationException("原生点填充面积等效点距与计划不一致。");
+                            record["point_density_per_mm2"] = density;
+                            record["point_spacing_mm"] = spacing;
+                            record["expected_point_spacing_mm"] = expectedSpacing;
+                            record["estimated_pattern_points"] = actualArea * density;
+                            record["point_density_scope"] = "infinite_pattern_symbol_rate_not_clipped_count";
+                        }
                         Hatches++; checkedPaths.Add(pair.Value);
                     }
                     _records.Add(record);

@@ -136,6 +136,7 @@ namespace AutoCAD.AI.Assistant.Services
 
         private static string CheckCommand(string type, Dictionary<string, object> command, HashSet<string> definedBlocks)
         {
+            if (command.ContainsKey("pointSpacing") && type != "hatch") return "pointSpacing仅用于hatch的面积等效点距。";
             if (command.ContainsKey("dashLength"))
             {
                 if (type != "line" && type != "polyline") return "dashLength目前仅用于line/polyline的实际最长实段。";
@@ -276,6 +277,16 @@ namespace AutoCAD.AI.Assistant.Services
                         return "材料与 pattern 不一致，请仅指定 material 或使用对应预设。";
                 }
                 if (command.ContainsKey("spacing")) { error = Positive(command, "spacing"); if (error != null) return error; }
+                if (command.ContainsKey("pointSpacing"))
+                {
+                    error = Positive(command, "pointSpacing"); if (error != null) return error;
+                    if (ToNumber(command["pointSpacing"]) > 100000000) return "pointSpacing超出允许的长度范围。";
+                    if (command.ContainsKey("spacing") || command.ContainsKey("scale")) return "pointSpacing不能与spacing或scale混用，请只指定面积等效点距。";
+                    var pointPattern = Text(command, "pattern");
+                    if (material.Length > 0) { double ignored; HatchMaterialPolicy.TryResolve(material, out pointPattern, out ignored); }
+                    if (!pointPattern.Equals("DOTS", StringComparison.OrdinalIgnoreCase) && !pointPattern.Equals("AR-SAND", StringComparison.OrdinalIgnoreCase))
+                        return "pointSpacing目前只支持DOTS或AR-SAND（含sand材料预设）。";
+                }
                 if (command.ContainsKey("holes"))
                 {
                     var holes = command["holes"] as object[];

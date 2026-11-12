@@ -72,10 +72,10 @@ namespace AutoCAD.AI.Assistant.Services
                     geometry.Add(reference);
                 }
                 var allowed = new List<string>();
-                foreach (var field in new[] {"position","height","width","rotation","arrowSize","spacing","scale","angle","lineweight","dashLength"}) if (Allowed(type,field)) allowed.Add(field);
+                foreach (var field in new[] {"position","height","width","rotation","arrowSize","spacing","pointSpacing","scale","angle","lineweight","dashLength"}) if (Allowed(type,field)) allowed.Add(field);
                 if (allowed.Count == 0) continue;
                 var target = new Dictionary<string, object> { {"command",path}, {"type",type}, {"allowed_fields",allowed} };
-                foreach (var key in new[] {"reference","side","value","confidence","position","height","width","rotation","arrowSize","spacing","scale","angle","lineweight","pattern","material","layer","dashLength"})
+                foreach (var key in new[] {"reference","side","value","confidence","position","height","width","rotation","arrowSize","spacing","pointSpacing","scale","angle","lineweight","pattern","material","layer","dashLength"})
                     if (command.ContainsKey(key)) target[key] = command[key];
                 if (command.ContainsKey("content"))
                 {
@@ -134,7 +134,7 @@ namespace AutoCAD.AI.Assistant.Services
                         {
                             if (!Finite(field.Value)) throw new InvalidOperationException(field.Key + "必须是有限数字。");
                             var number = CadPlanQuality.Number(field.Value);
-                            if ((field.Key == "height" || field.Key == "width" || field.Key == "spacing" || field.Key == "scale" || field.Key == "arrowSize" || field.Key == "dashLength") && number <= 0)
+                            if ((field.Key == "height" || field.Key == "width" || field.Key == "spacing" || field.Key == "pointSpacing" || field.Key == "scale" || field.Key == "arrowSize" || field.Key == "dashLength") && number <= 0)
                                 throw new InvalidOperationException(field.Key + "必须大于0。");
                             if (field.Key == "lineweight" && (number < 0 || number > 2.11)) throw new InvalidOperationException("lineweight超出允许的纸面毫米范围。");
                             if (Math.Abs(number) > 1000000) throw new InvalidOperationException(field.Key + "超出样式补丁允许范围。");
@@ -194,7 +194,7 @@ namespace AutoCAD.AI.Assistant.Services
             if (type == "dim" || type == "dimlinear" || type == "dimaligned") return field == "position";
             if (type == "text" || type == "mtext") return field == "position" || field == "height" || field == "rotation" || (type == "mtext" && field == "width");
             if (type == "leader") return field == "position" || field == "height" || field == "arrowSize";
-            if (type == "hatch") return field == "spacing" || field == "scale" || field == "angle" || field == "lineweight";
+            if (type == "hatch") return field == "spacing" || field == "pointSpacing" || field == "scale" || field == "angle" || field == "lineweight";
             return false;
         }
 
