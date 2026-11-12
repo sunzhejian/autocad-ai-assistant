@@ -135,11 +135,20 @@ internal static class ModelBenchmark
             }
             var streaming = Environment.GetEnvironmentVariable("CADAI_BENCH_STREAM") == "1";
             var details = Environment.GetEnvironmentVariable("CADAI_BENCH_DETAILS") == "1";
-            var method = clientType.GetMethods().Single(m => m.Name == "CompleteAsync" && m.GetParameters().Length == (details ? 8 : streaming ? 5 : 4));
             var image = args[1] == "-" ? null : Path.GetFullPath(args[1]);
+            var patchBasePath = Environment.GetEnvironmentVariable("CADAI_BENCH_PATCH_BASE");
+            var patchMode = !String.IsNullOrWhiteSpace(patchBasePath);
+            if (patchMode && Environment.GetEnvironmentVariable("CADAI_BENCH_PATCH_TEXT_ONLY") == "1") image = null;
+            report["source_image_sent"] = image != null;
+            var basePlan = patchMode ? File.ReadAllText(patchBasePath) : null;
+            if (patchMode && (streaming || details)) throw new Exception("Patch benchmark uses one image and no streaming.");
+            var method = patchMode ? clientType.GetMethod("CompletePlanPatchAsync")
+                : clientType.GetMethods().Single(m => m.Name == "CompleteAsync" && m.GetParameters().Length == (details ? 8 : streaming ? 5 : 4));
+            if (method == null) throw new Exception("This plugin does not expose the requested benchmark request mode.");
             var deltaCharacters = 0;
             Action<string> delta = value => deltaCharacters += value.Length;
-            var call = details ? new object[] { model, history, "", image, streaming ? delta : null, CancellationToken.None, null, true }
+            var call = patchMode ? new object[] { model, basePlan, prompt, image, CancellationToken.None }
+                : details ? new object[] { model, history, "", image, streaming ? delta : null, CancellationToken.None, null, true }
                 : streaming ? new object[] { model, history, "", image, delta } : new object[] { model, history, "", image };
             var answer = ((Task<string>)method.Invoke(client, call)).GetAwaiter().GetResult();
             report["stream_requested"] = streaming; report["stream_callback_characters"] = deltaCharacters;
@@ -147,7 +156,24 @@ internal static class ModelBenchmark
             report["answer"] = answer;
             var warning = clientType.GetProperty("LastCompatibilityWarning");
             report["compatibility_warning"] = warning == null ? null : warning.GetValue(client, null);
-            var plan = (string)assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanText", true).GetMethod("Extract").Invoke(null, new object[] { answer });
+            string plan;
+            if (patchMode)
+            {
+                var patchType = assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanPatch", true);
+                var access = BindingFlags.Static | BindingFlags.NonPublic;
+                var patch = (string)patchType.GetMethod("Extract", access).Invoke(null, new object[] { answer });
+                plan = (string)patchType.GetMethod("Apply", access).Invoke(null, new object[] { basePlan, patch });
+                report["patch_json"] = patch;
+                report["base_plan_text_sha256"] = patchType.GetMethod("Hash", access).Invoke(null, new object[] { basePlan });
+                report["plan_origin"] = "local_application_of_model_patch";
+                report["request_mode"] = "plan_patch";
+                File.WriteAllText(Path.ChangeExtension(args[2], ".patch.json"), patch, new UTF8Encoding(false));
+            }
+            else
+            {
+                plan = (string)assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanText", true).GetMethod("Extract").Invoke(null, new object[] { answer });
+                report["plan_origin"] = "model_full_plan"; report["request_mode"] = "drawing";
+            }
             report["plan"] = plan;
             report["validation"] = plan == null ? (image == null ? null : "No plan") : assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanValidator", true)
                 .GetMethod("Validate").Invoke(null, new object[] { plan });

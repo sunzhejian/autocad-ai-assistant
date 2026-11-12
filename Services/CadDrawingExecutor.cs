@@ -304,9 +304,7 @@ namespace AutoCAD.AI.Assistant.Services
         {
             ResolveLayerDefaults(name, ref linetype, ref lineweight);
             if (layerTable.Has(name)) return;
-            layerTable.UpgradeOpen();
-            var record = new LayerTableRecord { Name = name };
-            if (colorIndex >= 1 && colorIndex <= 255) record.Color = Color.FromColorIndex(ColorMethod.ByAci, (short)colorIndex);
+            var resolvedLinetype = ObjectId.Null;
             if (linetype != null && linetype.Trim().Length > 0)
             {
                 try
@@ -315,14 +313,20 @@ namespace AutoCAD.AI.Assistant.Services
                     if (!linetypeTable.Has(linetype))
                     {
                         linetypeTable.UpgradeOpen();
-                        database.LoadLineTypeFile(linetype, "acad.lin");
+                        database.LoadLineTypeFile(linetype, "acadiso.lin");
                     }
-                    if (linetypeTable.Has(linetype)) record.LinetypeObjectId = linetypeTable[linetype];
+                    if (!linetypeTable.Has(linetype)) throw new InvalidOperationException("线型未加载。");
+                    resolvedLinetype = linetypeTable[linetype];
                 }
-                catch
+                catch (Exception ex)
                 {
+                    throw new InvalidOperationException("无法加载线型 " + linetype + "（毫米模型使用acadiso.lin），未将其悄悄改成实线。", ex);
                 }
             }
+            layerTable.UpgradeOpen();
+            var record = new LayerTableRecord { Name = name };
+            if (colorIndex >= 1 && colorIndex <= 255) record.Color = Color.FromColorIndex(ColorMethod.ByAci, (short)colorIndex);
+            if (!resolvedLinetype.IsNull) record.LinetypeObjectId = resolvedLinetype;
             var weight = MapLineWeight(lineweight);
             if (weight.HasValue) record.LineWeight = weight.Value;
             layerTable.Add(record);
@@ -846,6 +850,7 @@ namespace AutoCAD.AI.Assistant.Services
                 var line = new Line(points[i], points[i + 1]) { Layer = layer };
                 ApplyProperties(line, command);
                 AppendEntity(space, line);
+                CadNativeLinetype.Apply(transaction, line, command);
                 transaction.AddNewlyCreatedDBObject(line, true);
                 count++;
             }
@@ -866,6 +871,7 @@ namespace AutoCAD.AI.Assistant.Services
             polyline.Closed = Boolean(command, "closed");
             ApplyProperties(polyline, command);
             AppendEntity(space, polyline);
+            CadNativeLinetype.Apply(transaction, polyline, command);
             transaction.AddNewlyCreatedDBObject(polyline, true);
             return 1;
         }

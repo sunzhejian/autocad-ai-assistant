@@ -49,7 +49,7 @@ namespace AutoCAD.AI.Assistant.Services
                 }
                 // lineweight is always a paper width in mm; scale, rotation, ratio and value are dimensionless/source readings.
                 if (type != "frame" && type != "layer" && type != "setvar" && type != "standard" && type != "textstyle")
-                    foreach (var field in new[] { "radius", "major", "height", "width", "leader", "spacing", "innerDiameter", "outerDiameter", "arrowSize" })
+                    foreach (var field in new[] { "radius", "major", "height", "width", "leader", "spacing", "innerDiameter", "outerDiameter", "arrowSize", "dashLength" })
                         if (c.ContainsKey(field)) c[field] = CadPlanQuality.Number(c[field]) * factor;
             }
         }

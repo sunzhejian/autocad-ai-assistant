@@ -286,7 +286,7 @@ def trial(case, number, prepared, run, plugin, helper, identity, env):
                                     folder / 'request.log', 280, env)
         result['request_wall_seconds'] = seconds
         model = read(report)
-        for key in ['model', 'model_configuration_sha256', 'plugin_version', 'reasoning_effort_requested',
+        for key in ['model', 'model_configuration_sha256', 'plugin_version', 'reasoning_effort_requested', 'request_mode', 'plan_origin', 'base_plan_text_sha256', 'source_image_sent',
                     'request_attempts', 'request_options_capture_available', 'compatibility_warning']:
             result[key] = model.get(key)
         result['model_seconds'] = model.get('seconds')
@@ -420,7 +420,7 @@ def main():
             raise ValueError('Model helper compilation failed')
         env = dict(os.environ, CADAI_BENCH_MODEL=args.model, CADAI_BENCH_STREAM='0',
                    CADAI_BENCH_DETAILS='1' if args.detailed_images else '0')
-        env = {k:v for k,v in env.items() if k.lower() != 'cadai_bench_reasoning'}
+        env = {k:v for k,v in env.items() if k.lower() not in {'cadai_bench_reasoning','cadai_bench_patch_base','cadai_bench_patch_text_only'}}
         report['status'] = 'preflight'
         save(run / 'report.json', report)
         report['native_preflight'] = native_preflight(run, plugin, identity, env)

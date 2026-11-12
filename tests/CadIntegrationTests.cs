@@ -62,8 +62,20 @@ public sealed class CadIntegrationTests
             && !(bool)startup.GetField("_pending", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null),
             "headless host skips startup UI and does not retain an idle subscription");
         var oldLinetypeScale = AcApplication.DocumentManager.MdiActiveDocument.Database.Ltscale;
+        double? existingCenter=null;
+        using(var tr=AcApplication.DocumentManager.MdiActiveDocument.Database.TransactionManager.StartTransaction())
+        {
+            var table=(LinetypeTable)tr.GetObject(AcApplication.DocumentManager.MdiActiveDocument.Database.LinetypeTableId,OpenMode.ForRead);
+            if(table.Has("CENTER")){var type=(LinetypeTableRecord)tr.GetObject(table["CENTER"],OpenMode.ForRead);var longest=0.0;for(var i=0;i<type.NumDashes;i++)longest=Math.Max(longest,type.DashLengthAt(i));existingCenter=longest;}
+        }
         var imageLines = "{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"views\":[\"section\"],\"commands\":[{\"type\":\"setvar\",\"name\":\"DIMTXT\",\"value\":35},{\"type\":\"line\",\"points\":[[0,0],[1000,1100]],\"layer\":\"中心线\"}]}";
         Check(Run(imageLines) != null, "image centerline executes with explicit text height");
+        using(var tr=AcApplication.DocumentManager.MdiActiveDocument.Database.TransactionManager.StartTransaction())
+        {
+            var table=(LinetypeTable)tr.GetObject(AcApplication.DocumentManager.MdiActiveDocument.Database.LinetypeTableId,OpenMode.ForRead);
+            var type=(LinetypeTableRecord)tr.GetObject(table["CENTER"],OpenMode.ForRead);var longest=0.0;for(var i=0;i<type.NumDashes;i++)longest=Math.Max(longest,type.DashLengthAt(i));
+            Check(Math.Abs(longest-(existingCenter??31.75))<1e-8,"missing CENTER loads metric millimeter definitions while an existing definition is preserved");
+        }
         using (var tr = AcApplication.DocumentManager.MdiActiveDocument.Database.TransactionManager.StartTransaction())
         {
             var table = (BlockTable)tr.GetObject(AcApplication.DocumentManager.MdiActiveDocument.Database.BlockTableId, OpenMode.ForRead);
@@ -160,6 +172,8 @@ public sealed class CadIntegrationTests
         VerifyGeometryReferences();
         VerifyPlanBudget();
         VerifyDimensionAnchors();
+        VerifyPlanPatch();
+        VerifyDashLengths();
         countBeforeFailure = Count();
         var commands = new List<string>();
         for (var i = 0; i < 400; i++) commands.Add("{\"type\":\"circle\",\"center\":[" + (i * 20) + ",2000],\"radius\":5}");
@@ -167,6 +181,106 @@ public sealed class CadIntegrationTests
         Check(Run("{\"commands\":[" + string.Join(",", commands.ToArray()) + "]}") != null && Count() == countBeforeFailure + 400, "400 command native batch");
         Results.Add(new { test = "400 command execution", milliseconds = timer.ElapsedMilliseconds });
         Save();
+    }
+
+    private static void VerifyDashLengths()
+    {
+        var db=AcApplication.DocumentManager.MdiActiveDocument.Database;
+        var previous=db.Ltscale;ObjectId oldId;var layerName="DASH_CUSTOM_NATIVE";
+        using(var tr=db.TransactionManager.StartTransaction())
+        {
+            var types=(LinetypeTable)tr.GetObject(db.LinetypeTableId,OpenMode.ForWrite);
+            var custom=new LinetypeTableRecord{Name="CADAI_TEST_CUSTOM_DASH",NumDashes=2,PatternLength=2};
+            custom.SetDashLengthAt(0,1.5);custom.SetDashLengthAt(1,-.5);types.Add(custom);tr.AddNewlyCreatedDBObject(custom,true);
+            var layers=(LayerTable)tr.GetObject(db.LayerTableId,OpenMode.ForWrite);
+            var layer=new LayerTableRecord{Name=layerName,LinetypeObjectId=custom.ObjectId,Color=Autodesk.AutoCAD.Colors.Color.FromColorIndex(Autodesk.AutoCAD.Colors.ColorMethod.ByAci,3)};
+            layers.Add(layer);tr.AddNewlyCreatedDBObject(layer,true);
+            var blocks=(BlockTable)tr.GetObject(db.BlockTableId,OpenMode.ForRead);
+            var model=(BlockTableRecord)tr.GetObject(blocks[BlockTableRecord.ModelSpace],OpenMode.ForWrite);
+            var old=new Line(new Point3d(0,-100,0),new Point3d(1000,-100,0)){Layer=layerName,LinetypeScale=2};
+            oldId=model.AppendEntity(old);tr.AddNewlyCreatedDBObject(old,true);tr.Commit();
+        }
+        db.Ltscale=7;
+        try
+        {
+            var before=Count();
+            var plan="{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":["
+                +"{\"type\":\"line\",\"points\":[[0,0],[1000,0]],\"layer\":\"DASH_CUSTOM_NATIVE\",\"dashLength\":300},"
+                +"{\"type\":\"polyline\",\"points\":[[0,100],[500,100],[1000,100]],\"layer\":\"DASH_CUSTOM_NATIVE\",\"dashLength\":150}]}";
+            Check(Run(plan)!=null&&Count()==before+2,"source-unit explicit dash lengths execute for lines and polylines with custom linetypes");
+            var lineOk=false;var polyOk=false;var oldOk=false;var definitionOk=false;
+            using(var tr=db.TransactionManager.StartTransaction())
+            {
+                var blocks=(BlockTable)tr.GetObject(db.BlockTableId,OpenMode.ForRead);var model=(BlockTableRecord)tr.GetObject(blocks[BlockTableRecord.ModelSpace],OpenMode.ForRead);
+                foreach(ObjectId id in model)
+                {
+                    var entity=(Entity)tr.GetObject(id,OpenMode.ForRead);if(entity.Layer!=layerName)continue;
+                    if(id==oldId){oldOk=Math.Abs(entity.LinetypeScale-2)<1e-8;continue;}
+                    var dash=1.5*entity.LinetypeScale*db.Ltscale;
+                    if(entity is Line)lineOk=Math.Abs(dash-3000)<1e-7;
+                    if(entity is Polyline)polyOk=Math.Abs(dash-1500)<1e-7;
+                }
+                var types=(LinetypeTable)tr.GetObject(db.LinetypeTableId,OpenMode.ForRead);var custom=(LinetypeTableRecord)tr.GetObject(types["CADAI_TEST_CUSTOM_DASH"],OpenMode.ForRead);
+                definitionOk=Math.Abs(custom.DashLengthAt(0)-1.5)<1e-8;
+            }
+            Check(lineOk&&polyOk&&File.ReadAllText(LastReceipt).Contains("expected_long_dash_mm"),"native receipt verifies actual longest dashes against explicit model millimeters");
+            Check(oldOk&&definitionOk&&db.Ltscale==7,"explicit dash lengths preserve old entities, custom definitions and the global linetype scale");
+            before=Count();
+            Check(Run("{\"commands\":[{\"type\":\"line\",\"points\":[[0,0],[100,0]],\"dashLength\":10,\"layer\":\"DASH_CONTINUOUS_NATIVE\"}]}")==null&&Count()==before,
+                "a continuous linetype cannot silently satisfy a requested dashed appearance");
+            Check(Run("{\"commands\":[{\"type\":\"line\",\"points\":[[0,0],[100,0]],\"dashLength\":300,\"layer\":\"DASH_CUSTOM_NATIVE\"},{\"type\":\"setvar\",\"name\":\"LTSCALE\",\"value\":14}]}")==null
+                &&Count()==before&&db.Ltscale==7,"late global scale changes that invalidate explicit dashes roll back the entire batch");
+            Check(Run("{\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":1},{\"type\":\"layer\",\"name\":\"UNKNOWN_DASH_NATIVE\",\"linetype\":\"NO_SUCH_LINETYPE_XYZ\"}]}")==null&&Count()==before,
+                "missing requested linetypes fail atomically instead of degrading to continuous lines");
+        }
+        finally{db.Ltscale=previous;}
+    }
+
+    private static void VerifyPlanPatch()
+    {
+        var assembly=Assembly.LoadFrom(Environment.GetEnvironmentVariable("CADAI_PLUGIN_DLL"));
+        var type=assembly.GetType("AutoCAD.AI.Assistant.Services.CadPlanPatch",true);
+        var flags=BindingFlags.Static|BindingFlags.NonPublic;
+        var original="{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"views\":[\"synthetic\"],\"commands\":["
+            +"{\"type\":\"standard\"},{\"type\":\"setvar\",\"name\":\"DIMSCALE\",\"value\":100},"
+            +"{\"type\":\"rect\",\"id\":\"opening\",\"p1\":[150,150],\"p2\":[850,950]},"
+            +"{\"type\":\"dimlinear\",\"reference\":\"opening\",\"side\":\"right\",\"position\":[900,550],\"value\":800,\"layer\":\"PATCH_NATIVE_DIM\"},"
+            +"{\"type\":\"text\",\"position\":[500,-100],\"height\":30,\"content\":\"PATCH\",\"layer\":\"PATCH_NATIVE_TEXT\"},"
+            +"{\"type\":\"line\",\"points\":[[500,100],[500,1000]],\"layer\":\"PATCH_NATIVE_中心\"}]}";
+        var hash=(string)type.GetMethod("Hash",flags).Invoke(null,new object[]{original});
+        var patch=new JavaScriptSerializer().Serialize(new{base_sha256=hash,updates=new object[]{
+            new{command="4",fields=new{position=new[]{1100,550}}},new{command="5",fields=new{height=100}}},setvars=new{LTSCALE=4000,DIMTSZ=25}});
+        var applied=(string)type.GetMethod("Apply",flags).Invoke(null,new object[]{original,patch});
+        var before=Count();var db=AcApplication.DocumentManager.MdiActiveDocument.Database;
+        var previousScale=db.Ltscale;var previousDimScale=db.Dimscale;var previousTick=db.Dimtsz;
+        try
+        {
+            Check(Run(applied)!=null && Count()==before+4 && hash==(string)type.GetMethod("Hash",flags).Invoke(null,new object[]{original}),
+                "hash-bound style patch executes as a normal atomic native batch without changing its original plan");
+            var dimensionOk=false;var textOk=false;var lineOk=false;
+            using(var tr=db.TransactionManager.StartTransaction())
+            {
+                var bt=(BlockTable)tr.GetObject(db.BlockTableId,OpenMode.ForRead);
+                var space=(BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace],OpenMode.ForRead);
+                foreach(ObjectId id in space)
+                {
+                    var entity=(Entity)tr.GetObject(id,OpenMode.ForRead);
+                    var dim=entity as RotatedDimension;var text=entity as DBText;var line=entity as Line;
+                    if(dim!=null&&entity.Layer=="PATCH_NATIVE_DIM")dimensionOk=Math.Abs(dim.Measurement-800)<1e-8
+                        &&Math.Abs(dim.XLine1Point.X-8500)<1e-8&&Math.Abs(dim.DimLinePoint.X-11000)<1e-8
+                        &&Math.Abs(dim.Dimtsz*dim.Dimscale-250)<1e-8;
+                    if(text!=null&&entity.Layer=="PATCH_NATIVE_TEXT")textOk=Math.Abs(text.Height-1000)<1e-8&&text.TextString=="PATCH";
+                    if(line!=null&&entity.Layer=="PATCH_NATIVE_中心")lineOk=Math.Abs(line.LinetypeScale*db.Ltscale-4000)<1e-8;
+                }
+            }
+            Check(dimensionOk&&textOk&&lineOk,"patch source-unit styles, actual dimension location, original endpoints and native readings are consistent");
+            before=Count();var rejected=false;
+            var unsafePatch=new JavaScriptSerializer().Serialize(new{base_sha256=hash,updates=new[]{new{command="4",fields=new{value=900}}}});
+            try{type.GetMethod("Apply",flags).Invoke(null,new object[]{original,unsafePatch});}
+            catch(TargetInvocationException ex){rejected=ex.InnerException is InvalidOperationException;}
+            Check(rejected&&Count()==before,"a native-host patch cannot change source readings or partially edit the drawing");
+        }
+        finally{db.Ltscale=previousScale;db.Dimscale=previousDimScale;db.Dimtsz=previousTick;}
     }
 
     private static void VerifyDimensionAnchors()

@@ -46,8 +46,11 @@ internal static class RegressionTests
             TestDimensionSizeSemantics();
             TestGeometryReferences();
             TestDimensionAnchors();
+            TestPlanPatches();
+            TestPatchClient().GetAwaiter().GetResult();
             TestReferenceRepair().GetAwaiter().GetResult();
             TestImageLinetypes();
+            TestDashLengths();
             TestDimensionFormatVariables();
             TestNewDrawingFeatures();
             TestMaterials();
@@ -318,6 +321,25 @@ internal static class RegressionTests
         Check(!DiagnosticsLog.Snapshot().Contains("buffer-0") && DiagnosticsLog.Snapshot().Contains("buffer-1199"), "diagnostic snapshot retains only recent messages");
     }
 
+    private static void TestDashLengths()
+    {
+        var line="{\"type\":\"line\",\"points\":[[0,0],[1000,0]],\"dashLength\":300,\"layer\":\"中心线\"}";
+        var source="{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"commands\":["+line+"]}";
+        var prepared=PreparedCadPlan.Create(source);var root=prepared.Claim();
+        Check(CadPlanQuality.Number(((Dictionary<string,object>)((object[])root["commands"])[0])["dashLength"])==3000,
+            "declared source dash length becomes model millimeters exactly once");
+        Check(CadPlanNormalizer.Normalize(prepared.Json)==prepared.Json,"dash length normalization remains idempotent");
+        Check(CadPlanValidator.Validate(Plan(line.Replace(":300",":0")))!=null,
+            "zero dash length cannot be treated as an explicit long-dash request");
+        Check(CadPlanValidator.Validate(Plan(line.Replace(":300",":-1")))!=null,
+            "negative dash length never reaches native linetype scaling");
+        Check(CadPlanValidator.Validate(Plan("{\"type\":\"circle\",\"center\":[0,0],\"radius\":10,\"dashLength\":10}"))!=null,
+            "unsupported dashLength fields are rejected rather than silently ignored");
+        var patch=Json.Serialize(new{base_sha256=CadPlanPatch.Hash(source),updates=new[]{new{command="1",fields=new{dashLength=400}}}});
+        Check(CadPlanPatch.Apply(source,patch).Contains("\"dashLength\":400")&&source.Contains("\"dashLength\":300"),
+            "a per-entity dash patch leaves source line geometry and original plan intact");
+    }
+
     private static void TestPlanBudgets()
     {
         var points = new List<object>();
@@ -428,6 +450,124 @@ internal static class RegressionTests
         meter = meter.Replace("{\"commands\":", "{\"sourceUnit\":\"m\",\"coordinateUnit\":\"source\",\"commands\":");
         Check(CadPlanValidator.Validate(meter) != null && CadPlanValidator.Validate(CadPlanNormalizer.Normalize(meter)) != null,
             "meter source units do not accidentally enlarge the reference tolerance by 1000");
+    }
+
+    private static void TestPlanPatches()
+    {
+        var original="{\"sourceUnit\":\"cm\",\"coordinateUnit\":\"source\",\"views\":[\"3-3\"],\"commands\":["
+            +"{\"type\":\"setvar\",\"name\":\"DIMSCALE\",\"value\":300},"
+            +"{\"type\":\"rect\",\"id\":\"opening\",\"p1\":[150,150],\"p2\":[850,950]},"
+            +"{\"type\":\"dimlinear\",\"reference\":\"opening\",\"side\":\"right\",\"position\":[800,550],\"value\":800},"
+            +"{\"type\":\"text\",\"position\":[400,-100],\"height\":30,\"content\":\"3-3\"}]}";
+        var hash=CadPlanPatch.Hash(original);
+        Func<object,string> patch=editList=>Json.Serialize(new{base_sha256=hash,updates=editList});
+        var updates=new object[]{new {command="3",fields=new{position=new[]{1100,550}}},new{command="4",fields=new{height=100}}};
+        var request=Json.Serialize(new{base_sha256=hash,updates=updates,setvars=new{LTSCALE=4000,DIMTSZ=25}});
+        var next=CadPlanPatch.Apply(original,request);
+        var root=(Dictionary<string,object>)Json.DeserializeObject(next);var commands=(object[])root["commands"];
+        Check(commands.Length==6 && ((Dictionary<string,object>)commands[1])["name"].ToString()=="LTSCALE"
+            && ((Dictionary<string,object>)commands[2])["name"].ToString()=="DIMTSZ",
+            "source style patches are inserted after settings and before the first actual entity");
+        var dim=(Dictionary<string,object>)commands[4];var shape=(Dictionary<string,object>)commands[3];
+        Check(CadPlanQuality.Number(dim["value"])==800 && Convert.ToString(dim["reference"])=="opening"
+            && CadPlanQuality.ReadPoint(dim["position"])[0]==1100 && CadPlanQuality.ReadPoint(shape["p1"])[0]==150,
+            "patch updates resolve original command paths before insertion without changing readings or geometry");
+        Check(!original.Contains("4000") && original.Contains("\"height\":30") && CadPlanValidator.Validate(next)==null,
+            "applying a valid patch leaves the original source string intact");
+        Check(CadPlanPatch.Extract("```cadpatch\n"+request+"\n```")==request,
+            "one explicit patch block is extracted without being mistaken for a full drawing plan");
+        var context=CadPlanPatch.Context(original);
+        Check(!context.Contains("\"commands\"") && context.Contains("editable_targets") && context.Contains("geometry_context")
+            && context.Contains(hash) && !context.Contains("\"allowed_fields\":[\"value\""),
+            "patch context is a hash-bound target summary rather than a copy of the original drawing program");
+        Action<string,string> rejected=(candidate,name)=>{try{CadPlanPatch.Apply(original,candidate);Check(false,name);}catch(InvalidOperationException){Check(true,name);}};
+        rejected(request.Replace(hash,new string('0',64)),"stale plan hashes cannot receive a style patch");
+        foreach(var field in new[]{"value","p1","reference","side","type","confidence","text"})
+        {
+            var fields=new Dictionary<string,object>{{field,1}};
+            rejected(patch(new[]{new{command="3",fields=fields}}),"style patch cannot alter dimension "+field);
+        }
+        rejected(patch(new[]{new{command="2",fields=new{p1=new[]{0,0}}}}),"style patches cannot edit a contour");
+        rejected(patch(new[]{new{command="4",fields=new{content="changed"}}}),"style patches cannot replace source title content");
+        rejected(patch(new[]{new{command="4",fields=new{height=-1}}}),"negative text height is rejected before CAD");
+        rejected(patch(new[]{new{command="3",fields=new{position=new[]{1,2,3}}}}),"patch positions cannot smuggle 3D projection changes");
+        rejected(patch(new[]{new{command="99999999999999999",fields=new{position=new[]{1,2}}}}),"overflowing command paths cannot address other objects");
+        rejected(patch(new[]{new{command="3",fields=new{position=new[]{1,2}}},new{command="3",fields=new{position=new[]{3,4}}}}),"duplicate command updates are ambiguous and rejected");
+        foreach(var name in new[]{"SECURELOAD","DIMLFAC","INSUNITS"})
+            rejected(Json.Serialize(new{base_sha256=hash,setvars=new Dictionary<string,object>{{name,1}}}),"patch cannot change "+name);
+        rejected(Json.Serialize(new{base_sha256=hash,setvars=new{LTSCALE=Double.PositiveInfinity}}),"non-finite style values cannot reach native CAD");
+        rejected(patch(new object[0]),"empty patches do not claim to repair a drawing");
+        var late=original.Replace("\"commands\":[", "\"commands\":[{\"type\":\"circle\",\"center\":[0,0],\"radius\":1},");
+        try{CadPlanPatch.Apply(late,Json.Serialize(new{base_sha256=CadPlanPatch.Hash(late),setvars=new{LTSCALE=4000,DIMTSZ=25,DIMSCALE=100}}));Check(false,"late style");}
+        catch(InvalidOperationException){Check(true,"adding several style fields cannot bypass the original settings boundary");}
+        var multi=original.Replace("[\"3-3\"]","[\"3-3\",\"4-4\"]");
+        try{CadPlanPatch.Apply(multi,Json.Serialize(new{base_sha256=CadPlanPatch.Hash(multi),setvars=new{LTSCALE=4000}}));Check(false,"multi-view style");}
+        catch(InvalidOperationException){Check(true,"global style patches cannot affect another declared view");}
+        var nested=Plan("{\"type\":\"BLOCK\",\"name\":\"patch_scope\",\"commands\":[{\"type\":\"text\",\"position\":[0,0],\"height\":3,\"content\":\"SOURCE\"}]}");
+        var localPatch=Json.Serialize(new{base_sha256=CadPlanPatch.Hash(nested),updates=new[]{new{command="1.1",fields=new{height=4}}}});
+        Check(CadPlanPatch.Apply(nested,localPatch).Contains("\"height\":4") && CadPlanPatch.Context(nested).Contains("\"can_setvars\":false"),
+            "block-local annotation updates retain scope and disable global style suggestions");
+    }
+
+    private static async Task TestPatchClient()
+    {
+        var original="{\"sourceUnit\":\"mm\",\"coordinateUnit\":\"source\",\"views\":[\"section\"],\"commands\":["
+            +"{\"type\":\"rect\",\"id\":\"r\",\"p1\":[0,0],\"p2\":[100,80]},"
+            +"{\"type\":\"dimlinear\",\"reference\":\"r\",\"side\":\"right\",\"position\":[110,40],\"value\":80,\"confidence\":\"read\"}]}";
+        var patch=Json.Serialize(new {base_sha256=CadPlanPatch.Hash(original),updates=new[]{new{command="2",fields=new{position=new[]{130,40}}}}});
+        Func<string,string> response=messageText=>Json.Serialize(new{choices=new[]{new{message=new{content=messageText},finish_reason="stop"}}});
+        var answerText="```cadpatch\n"+patch+"\n```";
+        using(var server=new Server())
+        {
+            server.Response=i=>Tuple.Create(200,response(answerText));
+            var model=Model(server);model.ModelId="auto";
+            var client=new OpenAiCompatibleClient();
+            var answer=await client.CompletePlanPatchAsync(model,original,"Only adjust the dimension location",ImagePath,CancellationToken.None);
+            Check(answer==answerText && server.Requests.Count==1 && server.Requests[0].Contains("image_url")
+                && !HasTemperature(server.Requests[0]) && !server.Requests[0].Contains("绘图协议："),
+                "patch AI request uses the real image and dedicated small-patch contract without full-plan regeneration");
+            Check(CadPlanPatch.Apply(original,CadPlanPatch.Extract(answer)).Contains("130"),
+                "validated AI patch can be applied locally while preserving the original geometry");
+        }
+        foreach(var bad in new[]{answerText.Replace("\"position\":[130,40]","\"value\":90"),
+            "```cad\n"+original+"\n```",answerText+"\n"+answerText})
+        using(var server=new Server())
+        {
+            server.Response=i=>Tuple.Create(200,response(bad));
+            try{await new OpenAiCompatibleClient().CompletePlanPatchAsync(Model(server),original,"review",ImagePath,CancellationToken.None);Check(false,"bad patch response");}
+            catch(InvalidOperationException){Check(server.Requests.Count==1,"unsafe, full-plan or multiple patch output stops without drawing or an extra repair request");}
+        }
+        using(var server=new Server())
+        {
+            server.Response=i=>Tuple.Create(200,response(answerText).Replace("\"stop\"","\"content_filter\""));
+            try{await new OpenAiCompatibleClient().CompletePlanPatchAsync(Model(server),original,"review",ImagePath,CancellationToken.None);Check(false,"filtered patch");}
+            catch(InvalidOperationException){Check(server.Requests.Count==1,"filtered patch output cannot trigger a correction loop");}
+        }
+        using(var server=new Server())
+        {
+            var token=new CancellationToken(true);
+            try{await new OpenAiCompatibleClient().CompletePlanPatchAsync(Model(server),original,"review",ImagePath,token);Check(false,"cancelled patch");}
+            catch(OperationCanceledException){Check(server.Requests.Count==0,"cancelled patch tasks cannot consume a model request");}
+            try{await new OpenAiCompatibleClient().CompletePlanPatchAsync(Model(server),new string('x',32001),"review",ImagePath,CancellationToken.None);Check(false,"oversized patch base");}
+            catch(InvalidOperationException){Check(server.Requests.Count==0,"patch input limits reject instead of silently truncating the source plan");}
+        }
+        using(var server=new Server())
+        {
+            var model=Model(server);model.ModelId="auto";model.ReasoningEffort="low";
+            server.Response=i=>i==1?Tuple.Create(400,"{\"error\":{\"message\":\"auto does not support parameter(s): reasoning_effort; please remove them\"}}")
+                :Tuple.Create(200,response(answerText));
+            var client=new OpenAiCompatibleClient();
+            var answer=await client.CompletePlanPatchAsync(model,original,"review",ImagePath,CancellationToken.None);
+            Check(answer==answerText && server.Requests.Count==2 && !String.IsNullOrWhiteSpace(client.LastCompatibilityWarning)
+                && server.Requests[0].Contains("reasoning_effort") && Reasoning(server.Requests[1])==null
+                && server.Requests.TrueForAll(r=>r.Contains("image_url") && r.Contains("cadpatch") && !r.Contains("绘图协议：")),
+                "patch parameter compatibility retries preserve image and patch mode while reporting budget fallback");
+        }
+        using(var server=new Server())
+        {
+            try{await new OpenAiCompatibleClient().CompletePlanPatchAsync(Model(server),original.Replace(",\"confidence\":\"read\"",""),"review",ImagePath,CancellationToken.None);Check(false,"invalid image patch base");}
+            catch(InvalidOperationException){Check(server.Requests.Count==0,"missing image dimension evidence blocks a patch request before it consumes quota");}
+        }
     }
 
     private static void TestDimensionAnchors()
@@ -684,13 +824,19 @@ internal static class RegressionTests
 
     private sealed class Server : IDisposable
     {
+        private static readonly HashSet<int> UsedPorts = new HashSet<int>();
         private readonly HttpListener Listener = new HttpListener();
         public readonly List<string> Requests = new List<string>();
         public string Url;
         public Func<int, Tuple<int, string>> Response;
         public Server()
         {
-            var port = new TcpListener(IPAddress.Loopback, 0); port.Start(); var number = ((IPEndPoint)port.LocalEndpoint).Port; port.Stop();
+            int number;
+            while (true)
+            {
+                var port = new TcpListener(IPAddress.Loopback, 0); port.Start(); number = ((IPEndPoint)port.LocalEndpoint).Port; port.Stop();
+                lock (UsedPorts) { if (UsedPorts.Add(number)) break; }
+            }
             Url = "http://127.0.0.1:" + number + "/"; Listener.Prefixes.Add(Url); Listener.Start();
             Task.Run(async delegate
             {

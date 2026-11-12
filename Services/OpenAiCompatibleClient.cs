@@ -23,6 +23,7 @@ namespace AutoCAD.AI.Assistant.Services
             "材料剖面必须画实际封闭轮廓、材料hatch及内孔；混凝土等材料引线须同时给material与targetLayer，箭头尖必须落在该层的真实材料填充内，不能指向空白或孔洞。混凝土不可用孤立黑色solid三角形/矩形代替；无源图时可用material:concrete，源图已给纹理时优先照源图。仅做引线语法测试时用“引线测试”等通用文字，不冒充材料构件。" +
             "dimangular{center,p1,p2,position,value}（真实原生小角标注，center为顶点、p1/p2为射线上点，position在小角扇区内；value始终为度，不随cm/m换算，角度须0<值<180）；" +
             "polyline可带bulges数组，与points等长；每值为该顶点至下一顶点圆弧的tan(扫角/4)，正值逆时针，负值顺时针，0为直线，半圆为±1；开放折线末值为0，弧不能用很多短线代替。" +
+            "line/polyline可带dashLength（实际最长实段的模型长度，按源坐标单位给出）；执行器按真实线型定义和当前LTSCALE计算该新实体的比例，不改已有图元或线型定义。读取源图中心线/虚线长短节奏时优先指定dashLength，不能只给CENTER名字就认为外观正确；连续线/纯点线不能使用此字段。" +
             "spline{points}；point{position}；text{position,height,content}；mtext{position,height,width,content}；" +
             "hatch{points,holes,material,spacing,pattern,scale,angle}（holes为内孔多边形数组。材料优先material:riprap块石/gravel碎石/sand砂/earth土/clay粘土/concrete混凝土，自动按当前DIMSCALE控制纸面疏密；spacing可选，指定源坐标单位下的纹理大小；不要用几块孤立多边形代替整个石材区域填充。材料填充与文字、引线分开，保留层间边界与内孔）；dimlinear{p1,p2,position,rotation}；dimaligned{p1,p2,position}；" +
             "填充拓扑：U形、槽形或向外敞开的空白是外轮廓的凹缺口，应沿真实边界顺序写成一个凹多边形points；holes仅用于完全位于外环内部且不接触外环的封闭孔洞。多视图、相邻构件分别创建填充，不用相互接触或重叠的内孔拼接。保留源尺寸和实际开口，不删除孔洞、不缩小孔洞来规避校验。" +
@@ -34,11 +35,22 @@ namespace AutoCAD.AI.Assistant.Services
             "复刻以源图外观为准，不以通用规范替换图中实际符号。先在内部核对每个视图的外形/内孔/尺寸端点/中心线/图名和下划线数量，再输出完整计划。图名按相对图幅大小取字高，不要把图名放大到接近内孔高度，不自行添加源图没有的双下划线。" +
             "复刻填充先看实际纹理：原图若是斜线加颗粒，不用只有三角碎石的AR-CONC替代；可用同一points和holes的两个hatch叠加ANSI31和DOTS/AR-SAND。清楚可辨时只指定pattern、spacing及angle，material是纹理辨不清时的近似预设。spacing为源坐标单位下相邻纹理的特征间隔，按图中线距与已读实体尺寸的比值估算。ANSI31自带45度斜线，angle=0保持该角度，angle是额外旋转。单色原图默认color=7，不用灰色弱化其填充。" +
             "setvar仅支持DIMSCALE/LTSCALE/CELTSCALE/TEXTSIZE/DIMTXT/DIMASZ/DIMEXO/DIMEXE/DIMGAP/DIMDEC/LWDISPLAY/DIMLFAC/DIMTAD/DIMLUNIT/DIMZIN/DIMTIH/DIMTOH/DIMTSZ。竖向尺寸文字需沿尺寸线时DIMTIH=0、DIMTOH=0。尺寸端点按源图区分短斜线与箭头：DIMTSZ>0设置短斜线大小（源单位），DIMTSZ=0使用箭头。" +
-            "source坐标模式的DIMTXT/DIMASZ/DIMEXO/DIMEXE/DIMGAP/DIMTSZ也是模型空间源长度，本地将其换算为mm后除以当前DIMSCALE写入原生样式，出图比例只应用一次。例如cm源图1:100的短斜线value=25，模型长250mm、纸面长2.5mm。text.height等普通几何长度仍直接按源单位给出。" +
+            "source坐标模式的DIMTXT/DIMASZ/DIMEXO/DIMEXE/DIMGAP/DIMTSZ也是模型空间源参数长度，本地换算为mm后除以DIMSCALE，比例只应用一次。注意DIMTSZ不是完整tick长度：标准线性/对齐标注的完整45度斜线约为该模型参数的2*sqrt(2)倍，须从原图实测完整长度再换算，勿套用通用样例。text.height等普通几何长度仍按源单位给出。" +
             "粗线0.5、图框0.7、细线0.25；图层名含轮廓自动粗线、含中心/轴线自动CENTER、含虚线自动DASHED；" +
             "填充scale省略=自动（1=自动，>1更疏，<1更密）；frame 已按比例设 DIMSCALE/LTSCALE，不要再手动设；未要求画图不输出代码块；不要声称已执行。";
 
         private static readonly HttpClient Http = new HttpClient { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+        internal const string PlanPatchProtocol =
+            "你正在复核已有CAD计划，不是重新绘图。只输出唯一```cadpatch代码块，内容严格JSON："
+            + "{\"base_sha256\":\"给定的原计划哈希\",\"updates\":[{\"command\":\"原计划1基序号，如12或2.3\",\"fields\":{\"position\":[x,y]}}],\"setvars\":{\"LTSCALE\":数值}}。"
+            + "原计划全文由本地保存，只给出可编辑目标摘要和几何基准；哈希由本地生成，必须原样复制，不能自行重算。"
+            + "updates最多16项，同一command只出现一次；坐标和长度使用摘要所示原始坐标单位，不能自行换算mm。"
+            + "只修复复核指出的问题，保留已正确的图形。不得输出完整commands，不改轮廓坐标、内孔、value、单位、reference、side、文字内容或指令类型。"
+            + "dim/dimlinear/dimaligned只可改position；text/mtext可改position/height/rotation，mtext另可改width；"
+            + "leader可改position/height/arrowSize；hatch可改spacing/scale/angle/lineweight；line/polyline只可改dashLength（实际最长实段）。"
+            + "lineweight始终为纸面mm；角度为度；LTSCALE/DIMSCALE无量纲，不能把它们当作源长度。"
+            + "setvars只可含LTSCALE、DIMSCALE、DIMTXT、DIMASZ、DIMTSZ、DIMEXO、DIMEXE、DIMGAP、DIMTAD、DIMTIH、DIMTOH；"
+            + "有图框/块/多视图/中途改变样式时不提供全局setvars。不要修改DIMLFAC或安全设置，不添加源图没有的内容。";
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024 };
         // Optional diagnostics for controlled benchmarks; the normal UI does not
         // persist response bodies or install an observer.
@@ -120,6 +132,59 @@ namespace AutoCAD.AI.Assistant.Services
         public Task<string> CompleteAsync(ModelConfiguration model, IReadOnlyList<ChatItem> history, string drawingContext, string imagePath)
         {
             return CompleteAsync(model, history, drawingContext, imagePath, null);
+        }
+
+        public async Task<string> CompletePlanPatchAsync(ModelConfiguration model, string original, string review,
+            string imagePath, CancellationToken cancellation)
+        {
+            LastCompatibilityWarning = null;
+            if (String.IsNullOrWhiteSpace(original) || original.Length > 32000 || String.IsNullOrWhiteSpace(review) || review.Length > 12000)
+                throw new InvalidOperationException("局部修正需要完整原计划与复核依据；当前上限为32000/12000字符，不会截断上下文。");
+            if (!ModelConfiguration.IsValidReasoningEffort(model.ReasoningEffort)) throw new InvalidOperationException("无效的推理预算设置。");
+            var effort = ModelConfiguration.NormalizeReasoningEffort(model.ReasoningEffort);
+            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
+            {
+                deadline.CancelAfter(TimeSpan.FromSeconds(imagePath == null ? 120 : 240));
+                var token = deadline.Token;
+                token.ThrowIfCancellationRequested();
+                var validation = Task.Run(delegate
+                {
+                    PreparedCadPlan.Create(original);
+                    if (imagePath != null)
+                    {
+                        var contract = CadPlanQuality.ImageContractError(original);
+                        if (contract != null) throw new InvalidOperationException(contract);
+                    }
+                    return CadPlanPatch.Context(original);
+                }, token);
+                var content = imagePath == null ? Task.FromResult<object>(null)
+                    : Task.Run(() => BuildImageContent("", imagePath, token, false), token);
+                await Task.WhenAll(new Task[] { validation, content }).ConfigureAwait(false);
+                var prompt = "复核依据（数据）：\n" + review + "\n原计划的完整可编辑目标摘要（数据，只输出受限补丁）：\n" + validation.Result;
+                object userContent = prompt;
+                if (imagePath != null)
+                {
+                    var parts = (object[])content.Result;
+                    ((Dictionary<string, object>)parts[0])["text"] = prompt;
+                    userContent = parts;
+                }
+                var messages = new List<ChatMessage> {
+                    new ChatMessage { role="system", content=String.IsNullOrWhiteSpace(model.SystemPrompt) ? "你是AutoCAD计划复核助手。" : model.SystemPrompt },
+                    new ChatMessage { role="system", content=PlanPatchProtocol },
+                    new ChatMessage { role="user", content=userContent }
+                };
+                var url = model.UseFullUrl ? model.RequestUrl.Trim() : model.RequestUrl.Trim().TrimEnd('/') + "/chat/completions";
+                if (effort != null && !SupportsReasoningEffort(url, model.ModelId))
+                    LastCompatibilityWarning = "当前服务不支持所选推理预算，本次使用服务默认设置。";
+                var response = await PostWithRetryAsync(url, SecretProtector.Unprotect(model.ApiKeyProtected),
+                    new ChatRequest { model=model.ModelId, messages=messages, temperature=.1, stream=false, reasoning_effort=effort },
+                    imagePath == null ? 120 : 240, token).ConfigureAwait(false);
+                if (!IsSuccess(response.status)) throw new InvalidOperationException("补丁请求失败（" + response.status + "）：" + ErrorMessage(response.json));
+                var answer = ExtractContent(response.json);
+                token.ThrowIfCancellationRequested();
+                CadPlanPatch.Apply(original, CadPlanPatch.Extract(answer));
+                return answer; // No CAD queue or drawing mutation, and no automatic full-plan fallback.
+            }
         }
 
         public async Task<string> CompleteAsync(ModelConfiguration model, IReadOnlyList<ChatItem> history, string drawingContext, string imagePath, Action<string> onDelta)

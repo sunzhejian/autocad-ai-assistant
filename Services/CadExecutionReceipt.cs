@@ -48,6 +48,18 @@ namespace AutoCAD.AI.Assistant.Services
                     };
                     var command = _commands[pair.Value];
                     if (command.ContainsKey("id")) record["geometry_id"] = CadGeometryReferences.Id(command["id"]);
+                    if (command.ContainsKey("dashLength") && (entity is Line || entity is Polyline))
+                    {
+                        string name;
+                        var basis = CadNativeLinetype.LongestBaseDash(transaction, entity, out name);
+                        var actualDash = basis * entity.LinetypeScale * _database.Ltscale;
+                        var expectedDash = CadPlanQuality.Number(command["dashLength"]);
+                        if (Double.IsNaN(actualDash) || Double.IsInfinity(actualDash) || Math.Abs(actualDash - expectedDash) > Math.Max(1e-6, expectedDash * 1e-8))
+                            throw new InvalidOperationException("原生线型最长实段与dashLength不一致，可能在创建图元后又修改了全局线型比例。");
+                        record["linetype"] = name; record["linetype_base_long_dash_mm"] = basis;
+                        record["linetype_entity_scale"] = entity.LinetypeScale; record["linetype_global_scale"] = _database.Ltscale;
+                        record["long_dash_mm"] = actualDash; record["expected_long_dash_mm"] = expectedDash;
+                    }
                     var dimension = entity as Dimension;
                     if (dimension != null)
                     {

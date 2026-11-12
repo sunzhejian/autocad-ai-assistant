@@ -136,6 +136,13 @@ namespace AutoCAD.AI.Assistant.Services
 
         private static string CheckCommand(string type, Dictionary<string, object> command, HashSet<string> definedBlocks)
         {
+            if (command.ContainsKey("dashLength"))
+            {
+                if (type != "line" && type != "polyline") return "dashLength目前仅用于line/polyline的实际最长实段。";
+                var dashError = Positive(command, "dashLength");
+                if (dashError != null) return dashError;
+                if (ToNumber(command["dashLength"]) > 100000000) return "dashLength超出允许的模型长度范围。";
+            }
             if (type == "layer")
             {
                 return string.IsNullOrEmpty(Text(command, "name")) ? "缺少 name（图层名）。" : null;
